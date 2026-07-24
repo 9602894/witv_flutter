@@ -1,0 +1,73 @@
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
+
+class PlayerWidget extends StatefulWidget {
+  final String url;
+  final VoidCallback onError;
+  final Function(double speed) onSpeedUpdate;
+
+  const PlayerWidget({Key? key, required this.url, required this.onError, required this.onSpeedUpdate}) : super(key: key);
+
+  @override
+  _PlayerWidgetState createState() => _PlayerWidgetState();
+}
+
+class _PlayerWidgetState extends State<PlayerWidget> {
+  late Player player;
+  late VideoController controller;
+  int reconnectAttempts = 0;
+  bool isReconnecting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    player = Player();
+    controller = VideoController(player);
+    _play();
+  }
+
+  void _play() {
+    player.open(Media(widget.url));
+    player.stream.buffer.listen((buffer) {
+      if (buffer > 0) {
+        final speed = buffer / 1024; // KB/s
+        widget.onSpeedUpdate(speed);
+      }
+    });
+    player.stream.error.listen((error) {
+      if (!isReconnecting) {
+        _attemptReconnect();
+      }
+    });
+  }
+
+  void _attemptReconnect() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    reconnectAttempts++;
+    final delay = Duration(milliseconds: (2000 * pow(2, reconnectAttempts - 1)).toInt().clamp(1000, 30000));
+    Future.delayed(delay, () {
+      if (mounted) {
+        player.open(Media(widget.url));
+        isReconnecting = false;
+        reconnectAttempts = 0;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Video(
+      controller: controller,
+      fit: BoxFit.contain,
+    );
+  }
+
+  @override
+  void dispose() {
+    player.dispose();
+    super.dispose();
+  }
+}
