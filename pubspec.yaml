@@ -1,0 +1,25 @@
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 播放器（跨平台，支持 Windows/Android/Linux/macOS）
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_native_event_loop: ^1.0.8
+
+  # 网络请求
+  dio: ^5.4.0
+  # XML 解析（EPG）
+  xml: ^6.5.0
+  # JSON 序列化
+  json_annotation: ^4.8.1
+  # 本地存储
+  shared_preferences: ^2.2.2
+  # 状态管理（推荐 Provider 或 Riverpod）
+  provider: ^6.1.1
+  # 文件操作（用于缓存）
+  path_provider: ^2.1.2
+  # 图标与主题
+  flutter_svg: ^2.0.9
+  # 拖拽布局（用于编辑模式）
+  flutter_draggable_gridview: ^0.5.2   # 可选
