@@ -39,13 +39,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      // 只使用默认 Player()，不传递任何配置，避免版本兼容性问题
+      // 使用默认配置，不传递任何参数（避免兼容性问题）
       player = Player();
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功（无自定义参数）');
+      LogService.write('Player 初始化成功');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -100,7 +100,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 检测解码方式变化，重启播放器
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.decoderIndex != _currentDecoder) {
       _currentDecoder = settings.decoderIndex;
