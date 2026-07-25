@@ -64,21 +64,7 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      - name: Download libmpv.so for all ABIs
-        run: |
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
-          mkdir -p android/app/src/main/jniLibs/x86
-          mkdir -p android/app/src/main/jniLibs/x86_64
-
-          # 从 media-kit/libmpv-android 官方仓库下载预编译的 so 文件
-          wget -O android/app/src/main/jniLibs/arm64-v8a/libmpv.so https://github.com/media-kit/libmpv-android/releases/download/v1.0.0/libmpv-android-1.0.0-arm64-v8a.so
-          wget -O android/app/src/main/jniLibs/armeabi-v7a/libmpv.so https://github.com/media-kit/libmpv-android/releases/download/v1.0.0/libmpv-android-1.0.0-armeabi-v7a.so
-          wget -O android/app/src/main/jniLibs/x86/libmpv.so https://github.com/media-kit/libmpv-android/releases/download/v1.0.0/libmpv-android-1.0.0-x86.so
-          wget -O android/app/src/main/jniLibs/x86_64/libmpv.so https://github.com/media-kit/libmpv-android/releases/download/v1.0.0/libmpv-android-1.0.0-x86_64.so
-
-          ls -la android/app/src/main/jniLibs/arm64-v8a/
-
+      # 移除可能导致冲突的插件
       - name: Remove problematic plugins
         run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
 
