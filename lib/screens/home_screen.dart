@@ -14,7 +14,7 @@ import '../widgets/group_list.dart';
 import '../widgets/schedule_view.dart';
 import '../widgets/info_popup.dart';
 import '../widgets/edit_toolbar.dart';
-import 'settings_screen.dart';
+import 'settings_screen.dart';  // 重要：导入 SettingsScreen
 
 class HomeScreen extends StatefulWidget {
   @override
