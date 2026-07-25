@@ -30,40 +30,23 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 下载 libmpv.so 并放入 jniLibs 目录
-      - name: Download libmpv.so
+      - name: Download and extract libmpv.so
         run: |
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
           mkdir -p android/app/src/main/jniLibs/x86
           mkdir -p android/app/src/main/jniLibs/x86_64
-          # 从 media-kit 官方仓库下载预编译的 libmpv.so
-          wget -O android/app/src/main/jniLibs/arm64-v8a/libmpv.so https://github.com/media-kit/android-dependencies/releases/download/v0.0.3/video-arm64-v8a.jar?raw=true
-          # 实际上，下载的是 jar 文件，需要解压提取 libmpv.so
-          # 更直接的方式：使用预编译的 so 文件（但官方没有直接提供 so，需要从 jar 中提取）
-          # 我们改用另一种方法：使用 media_kit 官方提供的 so 文件（来自 libmpv-android 构建）
-          # 为了简化，这里提供一个有效的下载链接（来自作者仓库）
-          # 替代方案：直接使用 https://github.com/media-kit/libmpv-android/releases
-          # 但为保险，我们从 jitpack 或其他源获取，但我现在提供最稳定的方法：
-          # 直接使用 curl 从 media_kit 示例项目中的资源获取（但可能不稳定）
-          # 所以我们改为：放弃下载，使用 media_kit_libs_android_video 的缓存，但我们可以设置 gradle 代理或重试
-          # 但是，由于网络问题，我们使用另一种方式：在构建时让 gradle 忽略下载错误，但不行。
-          # 最可靠的方式：使用 media_kit_libs_android_video 但用国内镜像，或者改用手动。
-          # 由于时间限制，我提供一种 workaround：在构建前，从 media-kit 的 GitHub release 下载完整的 jar 并提取 so。
-          # 注意：需要 unzip 命令
           sudo apt-get install -y unzip
+          # 正确下载链接（不带 ?raw=true）
           wget -O video-arm64-v8a.jar https://github.com/media-kit/android-dependencies/releases/download/v0.0.3/video-arm64-v8a.jar
-          unzip -j video-arm64-v8a.jar -d android/app/src/main/jniLibs/arm64-v8a/
           wget -O video-armeabi-v7a.jar https://github.com/media-kit/android-dependencies/releases/download/v0.0.3/video-armeabi-v7a.jar
-          unzip -j video-armeabi-v7a.jar -d android/app/src/main/jniLibs/armeabi-v7a/
           wget -O video-x86.jar https://github.com/media-kit/android-dependencies/releases/download/v0.0.3/video-x86.jar
-          unzip -j video-x86.jar -d android/app/src/main/jniLibs/x86/
           wget -O video-x86_64.jar https://github.com/media-kit/android-dependencies/releases/download/v0.0.3/video-x86_64.jar
+          unzip -j video-arm64-v8a.jar -d android/app/src/main/jniLibs/arm64-v8a/
+          unzip -j video-armeabi-v7a.jar -d android/app/src/main/jniLibs/armeabi-v7a/
+          unzip -j video-x86.jar -d android/app/src/main/jniLibs/x86/
           unzip -j video-x86_64.jar -d android/app/src/main/jniLibs/x86_64/
           ls -la android/app/src/main/jniLibs/arm64-v8a/
-
-      - name: Remove problematic plugins
-        run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
 
       - name: Build Android APK (release)
         run: flutter build apk --release
