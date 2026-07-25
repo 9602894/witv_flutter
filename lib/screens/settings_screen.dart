@@ -1,3 +1,4 @@
+import 'dart:io';  // 添加此行
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
@@ -45,7 +46,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('没有备份文件')));
       return;
     }
-    // 简单选择第一个（或弹出列表）
     final selected = await showDialog<File>(
       context: context,
       builder: (_) => AlertDialog(
@@ -83,7 +83,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: EdgeInsets.all(16),
         children: [
-          // 动态生成配置项
           ..._buildConfigWidgets(),
           Divider(),
           Text('订阅源管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -106,8 +105,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           Divider(),
           Text('EPG设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          // 这里依然保留单独的EPG地址设置（可放在配置中，也可独立）
-          // 建议从配置读取，但为了用户方便，单独一个输入
           ListTile(
             title: Text('EPG地址'),
             subtitle: Text(config!['EPG_URLS'] ?? '未设置'),
@@ -124,8 +121,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Widget> _buildConfigWidgets() {
     final widgets = <Widget>[];
     config!.forEach((key, value) {
-      // 跳过一些内部键，或者全部展示
-      if (key == 'EPG_URLS') return; // 单独处理
+      if (key == 'EPG_URLS') return;
       Widget widget;
       if (value is bool) {
         widget = SwitchListTile(
@@ -138,7 +134,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           },
         );
       } else if (value is num) {
-        // 整数或浮点数，用滑动条或数字输入
         widget = ListTile(
           title: Text(key),
           subtitle: Text('$value'),
@@ -161,9 +156,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       } else if (value is String) {
-        if (key == 'LIVE_URLS' && value == null) {
-          // 显示为空
-        }
         widget = ListTile(
           title: Text(key),
           subtitle: Text(value ?? '未设置'),
