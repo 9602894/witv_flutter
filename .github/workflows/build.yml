@@ -24,7 +24,7 @@ jobs:
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
-      - name: Repair pub cache
+      - name: Clear pub cache
         run: flutter pub cache repair
 
       - name: Install dependencies
@@ -55,7 +55,7 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Repair pub cache
+      - name: Clear pub cache
         run: flutter pub cache repair
 
       - name: Install dependencies
