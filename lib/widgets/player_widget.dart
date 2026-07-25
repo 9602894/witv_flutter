@@ -26,6 +26,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   int reconnectAttempts = 0;
   bool isReconnecting = false;
   bool _isInitialized = false;
+  String _currentUrl = '';
 
   @override
   void initState() {
@@ -35,11 +36,19 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      player = Player();
+      // 配置播放器：硬件解码、大缓冲、降低卡顿
+      final config = PlayerConfiguration(
+        hardwareDecoding: true, // 开启硬解
+        bufferDuration: Duration(milliseconds: 5000), // 缓冲5秒
+        bufferSize: 4096,
+        volume: 1.0,
+      );
+      player = Player(configuration: config);
       controller = VideoController(player);
       _isInitialized = true;
-      _play();
-      LogService.write('Player 初始化成功');
+      _currentUrl = widget.url;
+      _play(widget.url);
+      LogService.write('Player 初始化成功（硬件解码）');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -51,26 +60,29 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     }
   }
 
-  void _play() {
+  void _play(String url) {
     if (!_isInitialized) return;
-    LogService.write('开始播放: ${widget.url}');
-    player.open(Media(widget.url));
+    LogService.write('播放: $url');
+    player.open(Media(url));
+    // 速度监听
     player.stream.buffer.listen((buffer) {
       if (buffer.inMilliseconds > 0) {
         final speed = buffer.inMilliseconds / 1024;
         widget.onSpeedUpdate(speed);
       }
     });
+    // 错误重连
     player.stream.error.listen((error) {
       LogService.write('播放错误: $error');
       if (!isReconnecting) {
         _attemptReconnect();
       }
     });
+    // 播放完成自动续播
     player.stream.completed.listen((_) {
       LogService.write('播放完成，重新准备');
       if (player != null) {
-        player.open(Media(widget.url));
+        player.open(Media(url));
       }
     });
   }
@@ -83,7 +95,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     LogService.write('尝试重连，第 $reconnectAttempts 次，延迟 ${delay.inMilliseconds}ms');
     Future.delayed(delay, () {
       if (mounted && _isInitialized) {
-        player.open(Media(widget.url));
+        player.open(Media(_currentUrl));
         isReconnecting = false;
         reconnectAttempts = 0;
         LogService.write('重连成功');
@@ -94,9 +106,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 如果 URL 变化且当前已经初始化，则重新播放
     if (oldWidget.url != widget.url && _isInitialized) {
-      LogService.write('URL 变化，重新播放: ${widget.url}');
+      _currentUrl = widget.url;
+      LogService.write('切换频道: ${widget.url}');
       player.open(Media(widget.url));
     }
   }
@@ -106,6 +118,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized) {
       return Container(color: Colors.black);
     }
+    // 设置视频填充模式，避免绿边，并保持比例
     return Video(
       controller: controller,
       fit: BoxFit.contain,
