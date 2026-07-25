@@ -9,6 +9,18 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
+  // 异步初始化 media_kit（不阻塞 UI 启动）
+  // 使用 scheduleMicrotask 延迟执行，避免阻塞 runApp
+  scheduleMicrotask(() {
+    try {
+      MediaKit.ensureInitialized();
+      LogService.write('MediaKit 初始化成功');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  });
+
+  // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
@@ -19,11 +31,6 @@ void main() async {
   };
 
   runApp(MyApp());
-
-  Future.microtask(() {
-    MediaKit.ensureInitialized();
-    LogService.write('MediaKit 初始化成功');
-  });
 }
 
 class MyApp extends StatelessWidget {
