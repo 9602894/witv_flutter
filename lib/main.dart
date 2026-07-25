@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:media_kit/media_kit.dart';
-import 'dart:async'; // 添加 unawaited 的导入
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
 import 'services/log_service.dart';
@@ -10,14 +9,16 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 异步初始化 media_kit（不阻塞 UI）
-  unawaited(MediaKit.ensureInitialized());
+  // 初始化 media_kit（同步方法，不阻塞）
+  MediaKit.ensureInitialized();
 
-  // 捕获错误
+  // 捕获 Flutter 框架错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
   };
+
+  // 捕获 Dart 同步/异步错误
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
     LogService.writeCrashLog(error, stack);
     return true;
