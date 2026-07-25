@@ -9,10 +9,10 @@ dependencies:
   flutter:
     sdk: flutter
 
-  media_kit: ^1.2.6
-  media_kit_video: ^1.2.6
+  media_kit: ^1.2.0
+  media_kit_video: ^1.2.0
   media_kit_native_event_loop: ^1.0.8
-  media_kit_libs_android_video: ^1.2.0
+  media_kit_libs_android_video: ^1.0.0
 
   dio: ^5.4.0
   xml: ^6.5.0
@@ -43,5 +43,5 @@ flutter_launcher_icons:
   adaptive_icon_foreground: "ico/ic_launcher.png"
 
 dependency_overrides:
-  media_kit: 1.2.6
-  media_kit_video: 1.2.6
+  media_kit: 1.2.0
+  media_kit_video: 1.2.0
