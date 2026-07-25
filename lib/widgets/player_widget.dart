@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
-import '../services/settings_service.dart';
 
 class PlayerWidget extends StatefulWidget {
   final String url;
@@ -25,10 +23,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
   String _currentUrl = '';
-  Timer? _bufferTimer;
+  Timer? _speedTimer;
   double _speed = 0;
-  bool _isReconnecting = false;
-  Timer? _reconnectTimer;
 
   @override
   void initState() {
@@ -39,22 +35,18 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _initPlayer(String url) {
     _currentUrl = url;
     _controller?.dispose();
-    _isReconnecting = false;
-    _reconnectTimer?.cancel();
-
     _controller = VideoPlayerController.network(url)
       ..initialize().then((_) {
         setState(() {
           _isInitialized = true;
-          _isReconnecting = false;
         });
         _controller!.play();
         LogService.write('视频初始化成功: $url');
-        // 模拟网速
-        _bufferTimer?.cancel();
-        _bufferTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+        // 5秒刷新一次网速
+        _speedTimer?.cancel();
+        _speedTimer = Timer.periodic(Duration(seconds: 5), (timer) {
           if (_controller != null && _controller!.value.buffered.isNotEmpty) {
-            // 模拟网速 0.5~5.5 M/s
+            // 模拟网速，实际可用真实数据，这里我们用随机值展示效果
             double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
             widget.onSpeedUpdate(simulatedSpeed);
           }
@@ -62,25 +54,17 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       }).catchError((e) {
         LogService.write('视频初始化失败: $e');
         widget.onError();
-        // 检查是否开启重连
-        final settings = Provider.of<SettingsService>(context, listen: false);
-        if (settings.autoReconnect && !_isReconnecting) {
-          _attemptReconnect();
-        }
+        // 无限重连：每3秒重试一次
+        _attemptReconnect();
       });
   }
 
   void _attemptReconnect() {
-    if (_isReconnecting) return;
-    _isReconnecting = true;
-    LogService.write('尝试重连 (1秒后)');
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(seconds: 1), () {
-      if (mounted && !_isInitialized) {
-        LogService.write('重连中: $_currentUrl');
+    if (!mounted) return;
+    Future.delayed(Duration(seconds: 3), () {
+      if (!_isInitialized && mounted) {
+        LogService.write('尝试重连: $_currentUrl');
         _initPlayer(_currentUrl);
-      } else {
-        _isReconnecting = false;
       }
     });
   }
@@ -89,8 +73,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
-      _isReconnecting = false;
-      _reconnectTimer?.cancel();
       _initPlayer(widget.url);
     }
   }
@@ -100,11 +82,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized || _controller == null) {
       return Container(
         color: Colors.black,
-        child: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        ),
+        child: Center(child: CircularProgressIndicator()),
       );
     }
     return Stack(
@@ -113,7 +91,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           aspectRatio: _controller!.value.aspectRatio,
           child: VideoPlayer(_controller!),
         ),
-        // 网速显示（右下角）
+        // 网速显示（右下角，5秒刷新）
         Positioned(
           bottom: 20,
           right: 20,
@@ -136,8 +114,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void dispose() {
     _controller?.dispose();
-    _bufferTimer?.cancel();
-    _reconnectTimer?.cancel();
+    _speedTimer?.cancel();
     super.dispose();
   }
 }
