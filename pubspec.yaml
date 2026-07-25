@@ -9,7 +9,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 播放器核心（不包含 libs 包，我们手动提供 libmpv.so）
   media_kit: 1.1.10
   media_kit_video: 1.2.4
   media_kit_native_event_loop: ^1.0.8
