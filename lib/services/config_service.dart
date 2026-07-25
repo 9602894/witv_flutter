@@ -22,6 +22,9 @@ class ConfigService {
             _config = raw;
             await LogService.write('配置加载成功，键数: ${_config?.length}');
             return _config!;
+          } else {
+            await LogService.write('外部配置文件缺少 Configuration 键，删除并重新复制');
+            await file.delete();
           }
         } catch (e) {
           await LogService.write('外部配置文件解析失败: $e，从 assets 重新复制');
@@ -65,7 +68,7 @@ class ConfigService {
     if (!await backupDir.exists()) await backupDir.create();
     final backupFile = File('${backupDir.path}/${DateTime.now().millisecondsSinceEpoch}_$configFileName');
     await src.copy(backupFile.path);
-    await LogService.write('备份完成');
+    await LogService.write('配置已备份');
   }
 
   static Future<List<File>> getBackupFiles() async {
