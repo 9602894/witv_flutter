@@ -1,0 +1,9 @@
+{
+  "Configuration": {
+    "LIVE_URLS": null,
+    "EPG_URLS": "https://raw.githubusercontent.com/your/epg.xml",
+    "PLAY_TYPE": 7,
+    "PLAY_SCALE": 3,
+    "LIVE_CONNECT_TIMEOUT": 30
+  }
+}
