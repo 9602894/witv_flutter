@@ -9,8 +9,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 初始化 media_kit（同步，不阻塞）
-  MediaKit.ensureInitialized();
+  // 使用 scheduleMicrotask 延迟初始化 MediaKit，避免阻塞 UI 启动
+  scheduleMicrotask(() {
+    try {
+      MediaKit.ensureInitialized();
+      LogService.write('MediaKit 初始化成功');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  });
 
   // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
