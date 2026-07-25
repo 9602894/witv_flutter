@@ -47,7 +47,6 @@ class _ScheduleViewState extends State<ScheduleView> {
       days.add(date);
     }
     final sorted = days.toList()..sort();
-    // 仅保留今天及之后最多7天
     final today = DateTime.now();
     final todayStr = '${today.year}-${today.month}-${today.day}';
     final filtered = <String>[];
@@ -69,7 +68,6 @@ class _ScheduleViewState extends State<ScheduleView> {
     List<EpgProgram> dayPrograms = [];
     if (selectedDayIndex < dayLabels.length) {
       final targetDay = dayLabels[selectedDayIndex];
-      // 显式转换为 List<EpgProgram>
       dayPrograms = programs.where((p) =>
           '${p.start.year}-${p.start.month}-${p.start.day}' == targetDay).cast<EpgProgram>().toList();
     }
@@ -90,7 +88,6 @@ class _ScheduleViewState extends State<ScheduleView> {
           flex: 3,
           child: Column(
             children: [
-              // 日期标签
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
