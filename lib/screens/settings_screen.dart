@@ -280,8 +280,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: '名称')),
-            TextField(controller: urlCtrl, decoration: InputDecoration(labelText: 'URL')),
+            TextField(
+              controller: nameCtrl,
+              decoration: InputDecoration(labelText: '名称（如：5c直播）'),
+            ),
+            SizedBox(height: 8),
+            TextField(
+              controller: urlCtrl,
+              decoration: InputDecoration(labelText: 'URL（如：http://xxx.m3u）'),
+            ),
+            SizedBox(height: 8),
+            Text(
+              '提示：添加后自动选中，返回主页生效',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
           ],
         ),
         actions: [
@@ -292,9 +304,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final url = urlCtrl.text.trim();
               if (name.isNotEmpty && url.isNotEmpty) {
                 final settings = Provider.of<SettingsService>(context, listen: false);
-                settings.addSubscription(Subscription(name: name, url: url));
+                settings.addSubscription(Subscription(name: name, url: url, selected: true));
                 _markNeedRefresh();
                 Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已添加并选中: $name')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('名称和URL都不能为空')),
+                );
               }
             },
             child: Text('添加'),
