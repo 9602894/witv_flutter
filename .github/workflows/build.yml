@@ -58,27 +58,20 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 🔧 强制修补 screen_brightness_android 插件
+      # 🔧 精确修补 screen_brightness_android 插件的主 build.gradle.kts
       - name: Patch screen_brightness_android build.gradle.kts
         run: |
-          # 找到插件的 build.gradle.kts 文件
-          PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -name "build.gradle.kts" -path "*/screen_brightness_android*/android/*" | head -n 1)
+          PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/screen_brightness_android-*/android/build.gradle.kts" ! -path "*/example/*" | head -n 1)
           if [ -z "$PLUGIN_FILE" ]; then
             echo "❌ 未找到 screen_brightness_android 插件文件"
             exit 1
           fi
           echo "📄 找到文件: $PLUGIN_FILE"
           
-          # 备份原文件
           cp "$PLUGIN_FILE" "$PLUGIN_FILE.bak"
-          
-          # 修复 jvmTarget 赋值错误
           sed -i 's/jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8/jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)/' "$PLUGIN_FILE"
-          
-          # 修复 compilerOptions 错误（如果存在）
           sed -i 's/compilerOptions {/kotlinOptions {/g' "$PLUGIN_FILE"
           
-          # 验证修改是否成功
           if grep -q 'jvmTarget.set' "$PLUGIN_FILE"; then
             echo "✅ 修补成功"
           else
