@@ -31,6 +31,7 @@ class ConfigService {
           await file.delete();
         }
       }
+      // 从 assets 加载
       jsonString = await rootBundle.loadString('assets/$configFileName');
       await file.writeAsString(jsonString);
       final raw = jsonDecode(jsonString) as Map<String, dynamic>;
@@ -43,6 +44,7 @@ class ConfigService {
     return _config!;
   }
 
+  // 其他方法（saveConfig, resetToDefault, backup, getBackupFiles, restoreFromBackup）保持不变，但确保均有 await LogService.write
   static Future<void> saveConfig(Map<String, dynamic> config) async {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$configFileName');
