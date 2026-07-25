@@ -12,17 +12,14 @@ class LogService {
   /// 初始化日志文件（优先使用外部存储，若不可用则回退内部）
   static Future<void> init() async {
     try {
-      // 尝试获取外部存储目录（应用专属）
       final externalDir = await getExternalStorageDirectory();
       if (externalDir != null) {
         _logFile = File('${externalDir.path}/$logFileName');
       } else {
-        // 回退到内部文档目录
         final internalDir = await getApplicationDocumentsDirectory();
         _logFile = File('${internalDir.path}/$logFileName');
       }
     } catch (e) {
-      // 若失败，使用内部目录
       final internalDir = await getApplicationDocumentsDirectory();
       _logFile = File('${internalDir.path}/$logFileName');
     }
@@ -59,10 +56,24 @@ class LogService {
     await write(message);
   }
 
-  /// 读取完整日志（用于调试）
+  /// 读取完整日志
   static Future<String> read() async {
     if (_logFile == null) await init();
     if (!await _logFile!.exists()) return '';
     return await _logFile!.readAsString();
   }
+
+  /// 导出日志：将当前日志复制到带时间戳的新文件，并返回该文件
+  static Future<File> export() async {
+    if (_logFile == null) await init();
+    final dir = _logFile!.parent;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final exportFile = File('${dir.path}/witv_log_export_$timestamp.txt');
+    final content = await read();
+    await exportFile.writeAsString(content);
+    return exportFile;
+  }
+
+  /// 获取当前日志文件路径（便于外部访问）
+  static String get logFilePath => _logFile?.path ?? '';
 }
