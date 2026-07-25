@@ -39,6 +39,119 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) return Scaffold(body: Center(child: CircularProgressIndicator()));
+    final settings = Provider.of<SettingsService>(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('设置'),
+        actions: [
+          IconButton(icon: Icon(Icons.save), onPressed: _saveConfig),
+          IconButton(icon: Icon(Icons.backup), onPressed: _backup),
+          IconButton(icon: Icon(Icons.restore), onPressed: _restore),
+          IconButton(icon: Icon(Icons.file_download), onPressed: _exportLog),
+        ],
+      ),
+      body: ListView(
+        padding: EdgeInsets.all(16),
+        children: [
+          // 配置项
+          ..._buildConfigWidgets(),
+          Divider(),
+          // 解码器选择
+          Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ListTile(
+            title: Text('解码方式'),
+            subtitle: Text(['自动', '硬解', '软解'][settings.decoderIndex]),
+            trailing: IconButton(
+              icon: Icon(Icons.arrow_forward_ios),
+              onPressed: () => _showDecoderDialog(context),
+            ),
+          ),
+          Divider(),
+          Text('订阅源管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ...settings.subscriptions.map((sub) => ListTile(
+                title: Text(sub.name),
+                subtitle: Text(sub.url),
+                trailing: Checkbox(
+                  value: sub.selected,
+                  onChanged: (_) {
+                    settings.toggleSelected(sub);
+                    _markNeedRefresh();
+                  },
+                ),
+                onLongPress: () {
+                  settings.removeSubscription(sub);
+                  _markNeedRefresh();
+                },
+              )).toList(),
+          ElevatedButton(
+            onPressed: () => _addSubscriptionDialog(context),
+            child: Text('添加订阅'),
+          ),
+          Divider(),
+          Text('EPG设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ListTile(
+            title: Text('EPG地址'),
+            subtitle: Text(config!['EPG_URLS'] ?? '未设置'),
+            trailing: IconButton(
+              icon: Icon(Icons.edit),
+              onPressed: () => _editEpgDialog(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDecoderDialog(BuildContext context) {
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('选择解码方式'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<int>(
+              title: Text('自动（推荐）'),
+              value: 0,
+              groupValue: settings.decoderIndex,
+              onChanged: (v) {
+                settings.setDecoderIndex(v!);
+                Navigator.pop(context);
+              },
+            ),
+            RadioListTile<int>(
+              title: Text('硬件解码'),
+              value: 1,
+              groupValue: settings.decoderIndex,
+              onChanged: (v) {
+                settings.setDecoderIndex(v!);
+                Navigator.pop(context);
+              },
+            ),
+            RadioListTile<int>(
+              title: Text('软件解码'),
+              value: 2,
+              groupValue: settings.decoderIndex,
+              onChanged: (v) {
+                settings.setDecoderIndex(v!);
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
+        ],
+      ),
+    );
+  }
+
+  // 以下方法保持不变
   Future<void> _saveConfig() async {
     if (config != null) {
       final full = {'Configuration': config};
@@ -100,118 +213,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Provider.of<SettingsService>(context, listen: false).markNeedsRefresh();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (isLoading) return Scaffold(body: Center(child: CircularProgressIndicator()));
-    final settings = Provider.of<SettingsService>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('设置'),
-        actions: [
-          IconButton(icon: Icon(Icons.save), onPressed: _saveConfig),
-          IconButton(icon: Icon(Icons.backup), onPressed: _backup),
-          IconButton(icon: Icon(Icons.restore), onPressed: _restore),
-          IconButton(icon: Icon(Icons.file_download), onPressed: _exportLog),
-        ],
-      ),
-      body: ListView(
-        padding: EdgeInsets.all(16),
-        children: [
-          ..._buildConfigWidgets(),
-          Divider(),
-          // 解码器选择
-          Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ListTile(
-            title: Text('解码方式'),
-            subtitle: Text(['自动', '硬解', '软解'][settings.decoderIndex]),
-            trailing: IconButton(
-              icon: Icon(Icons.arrow_forward_ios),
-              onPressed: () => _showDecoderDialog(context),
-            ),
-          ),
-          Divider(),
-          Text('订阅源管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ...settings.subscriptions.map((sub) => ListTile(
-                title: Text(sub.name),
-                subtitle: Text(sub.url),
-                trailing: Checkbox(
-                  value: sub.selected,
-                  onChanged: (_) {
-                    settings.toggleSelected(sub);
-                    _markNeedRefresh();
-                  },
-                ),
-                onLongPress: () {
-                  settings.removeSubscription(sub);
-                  _markNeedRefresh();
-                },
-              )).toList(),
-          ElevatedButton(
-            onPressed: () => _addSubscriptionDialog(context),
-            child: Text('添加订阅'),
-          ),
-          Divider(),
-          Text('EPG设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ListTile(
-            title: Text('EPG地址'),
-            subtitle: Text(config!['EPG_URLS'] ?? '未设置'),
-            trailing: IconButton(
-              icon: Icon(Icons.edit),
-              onPressed: () => _editEpgDialog(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDecoderDialog(BuildContext context) {
-    final settings = Provider.of<SettingsService>(context, listen: false);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('选择解码方式'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<int>(
-              title: Text('自动'),
-              value: 0,
-              groupValue: settings.decoderIndex,
-              onChanged: (v) {
-                settings.setDecoderIndex(v!);
-                Navigator.pop(context);
-              },
-            ),
-            RadioListTile<int>(
-              title: Text('硬解'),
-              value: 1,
-              groupValue: settings.decoderIndex,
-              onChanged: (v) {
-                settings.setDecoderIndex(v!);
-                Navigator.pop(context);
-              },
-            ),
-            RadioListTile<int>(
-              title: Text('软解'),
-              value: 2,
-              groupValue: settings.decoderIndex,
-              onChanged: (v) {
-                settings.setDecoderIndex(v!);
-                Navigator.pop(context);
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
-        ],
-      ),
-    );
-  }
-
-  // ... 其余方法（_buildConfigWidgets, _editEpgDialog, _addSubscriptionDialog）保持不变，但为了完整性保留
   List<Widget> _buildConfigWidgets() {
     final widgets = <Widget>[];
     config!.forEach((key, value) {
@@ -337,20 +338,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: InputDecoration(labelText: '名称（如：5c直播）'),
-            ),
-            SizedBox(height: 8),
-            TextField(
-              controller: urlCtrl,
-              decoration: InputDecoration(labelText: 'URL（如：http://xxx.m3u）'),
-            ),
-            SizedBox(height: 8),
-            Text(
-              '提示：添加后自动选中，返回主页生效',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: '名称')),
+            TextField(controller: urlCtrl, decoration: InputDecoration(labelText: 'URL')),
           ],
         ),
         actions: [
@@ -364,13 +353,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 settings.addSubscription(Subscription(name: name, url: url, selected: true));
                 _markNeedRefresh();
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('已添加并选中: $name')),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('名称和URL都不能为空')),
-                );
               }
             },
             child: Text('添加'),
