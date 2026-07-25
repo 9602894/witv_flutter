@@ -10,10 +10,12 @@ class LogService {
       final internalDir = await getApplicationDocumentsDirectory();
       _logFile = File('${internalDir.path}/$logFileName');
     } catch (e) {
+      // 如果获取失败，使用临时目录
       final tempDir = Directory.systemTemp;
       _logFile = File('${tempDir.path}/$logFileName');
     }
 
+    // 如果文件超过1MB，重命名
     if (await _logFile!.exists()) {
       final size = await _logFile!.length();
       if (size > 1024 * 1024) {
@@ -34,7 +36,7 @@ class LogService {
     try {
       await _logFile!.writeAsString(line, mode: FileMode.append);
     } catch (e) {
-      // ignore
+      // 忽略写入错误
     }
   }
 
