@@ -8,7 +8,7 @@ import '../services/epg_parser.dart';
 import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
-import '../models/subscription.dart'; // 必须添加此行，解决 Subscription 未定义
+import '../models/subscription.dart';
 import '../widgets/player_widget.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
@@ -39,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -58,21 +59,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _init() async {
-    await _loadSavedSubscriptions();
-    final settings = Provider.of<SettingsService>(context, listen: false);
-    if (settings.subscriptions.isEmpty) {
-      await _addDefaultSubscription();
+    try {
+      await _loadSavedSubscriptions();
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      if (settings.subscriptions.isEmpty) {
+        await _addDefaultSubscription();
+      }
+      await _loadInitialSource();
+      _checkSubscriptions();
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+      setState(() {
+        _errorMessage = '初始化失败: $e';
+      });
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
     }
-    await _loadInitialSource();
-    _checkSubscriptions();
-    setState(() {
-      isLoading = false;
-    });
     LogService.write('主页初始化完成');
     _loadEpgInBackground();
   }
 
   Future<void> _loadSavedSubscriptions() async {
+    // 已由 SettingsService 加载
     await Future.delayed(Duration.zero);
   }
 
@@ -138,11 +148,19 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       isLoading = true;
     });
-    await _loadInitialSource();
-    _checkSubscriptions();
-    setState(() {
-      isLoading = false;
-    });
+    try {
+      await _loadInitialSource();
+      _checkSubscriptions();
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+      setState(() {
+        _errorMessage = '刷新失败: $e';
+      });
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   void _checkSubscriptions() {
@@ -209,6 +227,10 @@ class _HomeScreenState extends State<HomeScreen> {
       LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
+      // 不重新抛出，让界面显示错误信息
+      setState(() {
+        _errorMessage = '加载订阅源失败: $e';
+      });
     }
   }
 
@@ -242,6 +264,32 @@ class _HomeScreenState extends State<HomeScreen> {
     if (isLoading) {
       return Scaffold(
         body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error, size: 64, color: Colors.red),
+              SizedBox(height: 16),
+              Text('错误: $_errorMessage', style: TextStyle(color: Colors.white)),
+              SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _errorMessage = null;
+                    isLoading = true;
+                  });
+                  _init();
+                },
+                child: Text('重试'),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
