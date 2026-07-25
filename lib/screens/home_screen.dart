@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' show exit;
 import '../services/settings_service.dart';
@@ -53,21 +52,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 如果右侧菜单显示，则关闭
         if (_showRightMenu) {
-          setState(() {
-            _showRightMenu = false;
-          });
+          setState(() => _showRightMenu = false);
           return false;
         }
-        // 如果覆盖层显示，则隐藏
         if (showOverlay) {
-          setState(() {
-            showOverlay = false;
-          });
+          setState(() => showOverlay = false);
           return false;
         }
-        // 如果都没显示，弹窗确认退出
         final shouldExit = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
@@ -86,7 +78,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
         if (shouldExit == true) {
-          // 退出应用
           exit(0);
         }
         return false;
@@ -98,9 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (currentChannel != null)
               PlayerWidget(
                 url: currentChannel!.url,
-                onError: () {
-                  LogService.write('播放器错误回调');
-                },
+                onError: () => LogService.write('播放器错误回调'),
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
@@ -132,7 +121,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           selectedChannel: currentChannel,
                           onSelect: (ch) {
                             LogService.write('选择频道: ${ch.name}');
-                            setState(() => currentChannel = ch);
+                            setState(() {
+                              currentChannel = ch;
+                            });
                           },
                           epgMap: epgMap,
                         ),
@@ -156,7 +147,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ========= 右侧菜单（宽度10%） =========
+            // 右侧菜单（宽度10%）
             if (_showRightMenu)
               Positioned(
                 top: 0,
@@ -187,9 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         });
                       }),
                       _buildMenuItem(Icons.close, '关闭', () {
-                        setState(() {
-                          _showRightMenu = false;
-                        });
+                        setState(() => _showRightMenu = false);
                       }),
                     ],
                   ),
@@ -224,7 +213,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () {
                       setState(() {
                         isScheduleMode = !isScheduleMode;
-                        // 如果节目单显示则关闭覆盖层
                         if (isScheduleMode) showOverlay = false;
                       });
                     },
@@ -303,8 +291,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 以下为数据加载方法（完整实现） ==========
-
+  // ===== 数据加载方法 =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
@@ -321,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSavedSubscriptions() async {
-    // 已由 SettingsService 加载，无需额外操作
+    // 已由 SettingsService 加载
     await Future.delayed(Duration.zero);
   }
 
@@ -362,11 +349,11 @@ class _HomeScreenState extends State<HomeScreen> {
         if (epgUrlRaw.contains(r'$')) {
           epgUrl = epgUrlRaw.split(r'$')[0].trim();
         }
-        LogService.write('EPG URL (纯): $epgUrl');
+        LogService.write('EPG URL: $epgUrl');
         final map = await EpgParser.loadAllEpg(epgUrl).timeout(
           Duration(seconds: 30),
           onTimeout: () {
-            LogService.write('EPG 加载超时，跳过');
+            LogService.write('EPG 加载超时');
             return {};
           },
         );
@@ -374,24 +361,10 @@ class _HomeScreenState extends State<HomeScreen> {
           epgMap = map;
         });
         LogService.write('EPG加载成功，频道数: ${map.length}');
-      } else {
-        LogService.write('EPG URL为空，跳过');
       }
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
     }
-  }
-
-  Future<void> _reloadData() async {
-    LogService.write('刷新数据');
-    setState(() {
-      isLoading = true;
-    });
-    await _loadInitialSource();
-    _checkSubscriptions();
-    setState(() {
-      isLoading = false;
-    });
   }
 
   void _checkSubscriptions() {
@@ -452,7 +425,11 @@ class _HomeScreenState extends State<HomeScreen> {
         if (groups.isNotEmpty) {
           currentGroup = groups.first;
           channels = groupMap[currentGroup]!;
-          if (channels.isNotEmpty) currentChannel = channels.first;
+          if (channels.isNotEmpty) {
+            currentChannel = channels.first;
+            // 强制刷新播放器
+            LogService.write('当前频道: ${currentChannel!.name}');
+          }
         }
       });
       LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
