@@ -7,14 +7,20 @@ import 'services/log_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 初始化日志（先于一切）
   await LogService.init();
 
-  // 初始化媒体播放器（同步，但很快）
-  MediaKit.ensureInitialized();
+  // 异步初始化 media_kit（不阻塞 UI 启动）
+  // 使用 Future.microtask 延迟执行
+  Future.microtask(() {
+    try {
+      MediaKit.ensureInitialized();
+      LogService.write('MediaKit 初始化成功');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  });
 
-  // 全局错误捕获
+  // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
