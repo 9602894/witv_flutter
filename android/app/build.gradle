@@ -27,7 +27,7 @@ apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace 'com.whyun.witv'
-    compileSdkVersion 34
+    compileSdkVersion 34  // 改为 34 避免资源问题
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
