@@ -7,6 +7,19 @@ import 'services/log_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
+
+  // 捕获 Flutter 框架错误
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.dumpErrorToConsole(details);
+    LogService.writeCrashLog(details.exception, details.stack);
+  };
+
+  // 捕获 Dart 同步/异步错误
+  PlatformDispatcher.instance.onError = (error, stack) {
+    LogService.writeCrashLog(error, stack);
+    return true;
+  };
+
   runApp(MyApp());
 }
 
