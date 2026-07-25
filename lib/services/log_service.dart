@@ -7,15 +7,23 @@ class LogService {
 
   static Future<void> init() async {
     try {
-      final internalDir = await getApplicationDocumentsDirectory();
-      _logFile = File('${internalDir.path}/$logFileName');
+      // 获取外部存储目录（应用专属）
+      final externalDir = await getExternalStorageDirectory();
+      if (externalDir != null) {
+        _logFile = File('${externalDir.path}/$logFileName');
+      } else {
+        // 若外部不可用，回退到内部
+        final internalDir = await getApplicationDocumentsDirectory();
+        _logFile = File('${internalDir.path}/$logFileName');
+      }
+      // 确保父目录存在
+      await _logFile!.parent.create(recursive: true);
     } catch (e) {
-      // 如果获取失败，使用临时目录
+      // 如果都失败，使用临时目录
       final tempDir = Directory.systemTemp;
       _logFile = File('${tempDir.path}/$logFileName');
     }
-
-    // 如果文件超过1MB，重命名
+    // 如果文件超过1MB，轮转
     if (await _logFile!.exists()) {
       final size = await _logFile!.length();
       if (size > 1024 * 1024) {
@@ -36,7 +44,7 @@ class LogService {
     try {
       await _logFile!.writeAsString(line, mode: FileMode.append);
     } catch (e) {
-      // 忽略写入错误
+      // ignore
     }
   }
 
