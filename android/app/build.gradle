@@ -40,6 +40,8 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+        // 确保 so 库被包含
+        main.jniLibs.srcDirs = ['src/main/jniLibs']
     }
 
     defaultConfig {
@@ -56,12 +58,10 @@ android {
         }
     }
 
-    // 关键：解决 so 库冲突，确保 libmpv.so 被包含
     packagingOptions {
         pickFirst '**/*.so'
     }
 
-    // 包含所有常见 ABI（确保 libmpv.so 对当前设备可用）
     splits {
         abi {
             enable false
