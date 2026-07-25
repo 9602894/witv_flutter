@@ -9,33 +9,18 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 播放器核心（支持 Windows/Android/Linux/macOS）
+  # 播放器核心
   media_kit: ^1.1.10
-  media_kit_video: ^1.2.4
+  media_kit_video: ^1.2.4    # 固定版本
   media_kit_native_event_loop: ^1.0.8
 
-  # 网络请求
   dio: ^5.4.0
-
-  # XML 解析（EPG）
   xml: ^6.5.0
-
-  # JSON 序列化
   json_annotation: ^4.8.1
-
-  # 本地存储
   shared_preferences: ^2.2.2
-
-  # 状态管理
   provider: ^6.1.1
-
-  # 文件路径（用于缓存）
   path_provider: ^2.1.2
-
-  # SVG 图标（可选）
   flutter_svg: ^2.0.9
-
-  # screen_brightness 已移除，避免编译问题
 
 dev_dependencies:
   flutter_test:
@@ -47,3 +32,7 @@ flutter:
   assets:
     - assets/configuration.json
     - assets/epg_data.json
+
+# 锁定 media_kit_video 版本，避免兼容性问题
+dependency_overrides:
+  media_kit_video: 1.2.4
