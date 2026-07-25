@@ -8,11 +8,11 @@ import '../services/epg_parser.dart';
 import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
+import '../models/subscription.dart';  // 添加订阅模型导入
 import '../widgets/player_widget.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
 import '../widgets/schedule_view.dart';
-import '../widgets/info_popup.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -25,11 +25,11 @@ class _HomeScreenState extends State<HomeScreen> {
   List<String> groups = [];
   Channel? currentChannel;
   String? currentGroup;
-  bool showChannelList = false; // 频道列表是否显示（点击左侧切换）
+  bool showChannelList = false;
   bool isScheduleMode = false;
   bool isEditMode = false;
   bool _showRightMenu = false;
-  bool _showEpgInfo = false; // EPG信息浮窗是否显示
+  bool _showEpgInfo = false;
 
   double subWeight = 0.15;
   double groupWeight = 0.20;
@@ -39,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double scheduleRightWeight = 0.65;
 
   Map<String, List<EpgProgram>> epgMap = {};
-  double currentSpeed = 0; // 网速 M/s
+  double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
 
@@ -54,22 +54,18 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 返回键优先关闭 EPG 信息浮窗
         if (_showEpgInfo) {
           setState(() => _showEpgInfo = false);
           return false;
         }
-        // 其次关闭右侧菜单
         if (_showRightMenu) {
           setState(() => _showRightMenu = false);
           return false;
         }
-        // 其次关闭频道列表
         if (showChannelList) {
           setState(() => showChannelList = false);
           return false;
         }
-        // 最后退出确认
         final shouldExit = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
@@ -103,7 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // 左侧点击区域（点击后切换频道列表显示）
+            // 左侧点击区域（显示/隐藏频道列表）
             Positioned(
               left: 0,
               top: 0,
@@ -114,7 +110,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   setState(() {
                     showChannelList = !showChannelList;
                     if (showChannelList) {
-                      // 显示频道列表时，隐藏其他覆盖层（右侧菜单、EPG信息）
                       _showRightMenu = false;
                       _showEpgInfo = false;
                     }
@@ -124,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // 频道列表（透明背景，左侧弹出）
+            // 频道列表（透明背景）
             if (showChannelList)
               Positioned(
                 left: 0,
@@ -133,35 +128,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: MediaQuery.of(context).size.width * 0.3,
                 child: Container(
                   color: Colors.transparent,
-                  child: Column(
-                    children: [
-                      // 分组列表（如果希望显示分组，可以添加）
-                      // 这里仅显示频道列表，分组可以在频道列表上方显示，但为了方便，我们直接显示频道列表
-                      Expanded(
-                        child: Container(
-                          color: Colors.transparent,
-                          child: ChannelList(
-                            channels: channels,
-                            selectedChannel: currentChannel,
-                            onSelect: (ch) {
-                              LogService.write('选择频道: ${ch.name}');
-                              setState(() {
-                                currentChannel = ch;
-                                showChannelList = false; // 选择后自动关闭
-                                _showEpgInfo = true; // 显示EPG信息
-                              });
-                            },
-                            epgMap: epgMap,
-                            showChannelNumber: true, // 显示频道号
-                          ),
-                        ),
-                      ),
-                    ],
+                  child: ChannelList(
+                    channels: channels,
+                    selectedChannel: currentChannel,
+                    onSelect: (ch) {
+                      LogService.write('选择频道: ${ch.name}');
+                      setState(() {
+                        currentChannel = ch;
+                        showChannelList = false;
+                        _showEpgInfo = true;
+                      });
+                    },
+                    epgMap: epgMap,
+                    showChannelNumber: true,
                   ),
                 ),
               ),
 
-            // 节目单模式（透明背景）
+            // 节目单模式
             if (isScheduleMode)
               Positioned.fill(
                 child: Container(
@@ -187,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 右侧菜单（返回键弹出）
+            // 右侧菜单
             if (_showRightMenu)
               Positioned(
                 top: 0,
@@ -195,7 +179,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 bottom: 0,
                 width: MediaQuery.of(context).size.width * 0.12,
                 child: Container(
-                  color: Colors.transparent, // 透明背景
+                  color: Colors.transparent,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -234,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // EPG 信息浮窗（屏幕中下部，保活）
+            // EPG 信息浮窗
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -245,19 +229,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     constraints: BoxConstraints(maxWidth: 500),
                     padding: EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.black54, // 轻微半透明背景，以便文字清晰
+                      color: Colors.black54,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // 频道名
                         Text(
                           currentChannel!.name,
                           style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         SizedBox(height: 8),
-                        // 当前节目
                         if (EpgParser.getProgramsForChannel(currentChannel!.name).isNotEmpty) ...[
                           _buildEpgItem(EpgParser.getProgramsForChannel(currentChannel!.name)[0], '当前节目'),
                           SizedBox(height: 4),
@@ -271,7 +253,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 顶部工具栏（透明）
+            // 顶部工具栏
             Positioned(
               top: 0,
               right: 0,
@@ -301,7 +283,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // 编辑模式信息（透明背景）
+            // 编辑模式信息
             if (isEditMode)
               Positioned(
                 top: 50,
@@ -333,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 点击其他空白处关闭频道列表和EPG信息
+            // 点击空白处关闭频道列表和 EPG 信息
             if (showChannelList || _showEpgInfo)
               Positioned.fill(
                 child: GestureDetector(
@@ -372,7 +354,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 菜单项 ==========
   Widget _buildMenuItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -390,7 +371,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 订阅对话框（略，与之前相同）
   void _showAddSubscriptionDialog() {
     final nameCtrl = TextEditingController();
     final urlCtrl = TextEditingController();
@@ -457,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 数据加载（与之前相同） =====
+  // ===== 数据加载 =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
@@ -601,7 +581,6 @@ class _HomeScreenState extends State<HomeScreen> {
           channels = groupMap[currentGroup]!;
           if (channels.isNotEmpty) {
             currentChannel = channels.first;
-            // 显示EPG信息
             _showEpgInfo = true;
           }
         }
