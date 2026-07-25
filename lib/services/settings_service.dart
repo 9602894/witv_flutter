@@ -7,7 +7,7 @@ import 'log_service.dart';
 class SettingsService extends ChangeNotifier {
   List<Subscription> _subscriptions = [];
   bool _needsRefresh = false;
-  int _decoderIndex = 0; // 0=自动, 1=硬解, 2=软解
+  int _decoderIndex = 0; // 0=系统解码，1=IJK硬解，2=IJK软解，3=EXO硬解，4=EXO软解，5=MPV硬解，6=MPV软解
 
   List<Subscription> get subscriptions => _subscriptions;
   bool get needsRefresh => _needsRefresh;
