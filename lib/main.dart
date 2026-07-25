@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:media_kit/media_kit.dart';
+import 'dart:async'; // 添加 unawaited 的导入
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
 import 'services/log_service.dart';
