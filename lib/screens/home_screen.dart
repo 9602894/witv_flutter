@@ -8,7 +8,6 @@ import '../services/epg_parser.dart';
 import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
-import '../models/subscription.dart';  // 添加这行
 import '../widgets/player_widget.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
@@ -73,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSavedSubscriptions() async {
-    // 已由 SettingsService 加载，无需额外操作
+    await Future.delayed(Duration.zero);
   }
 
   Future<void> _addDefaultSubscription() async {
@@ -93,7 +92,8 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
         final settings = Provider.of<SettingsService>(context, listen: false);
-        settings.addSubscription(Subscription(name: name, url: url, selected: true));
+        final sub = Subscription(name: name, url: url, selected: true);
+        settings.addSubscription(sub);
         LogService.write('自动添加默认订阅源: $name -> $url');
       }
     } catch (e, stack) {
