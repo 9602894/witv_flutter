@@ -7,7 +7,8 @@ class ChannelList extends StatelessWidget {
   final Channel? selectedChannel;
   final ValueChanged<Channel> onSelect;
   final Map<String, List<EpgProgram>> epgMap;
-  final bool showChannelNumber; // 是否显示频道号
+  final bool showChannelNumber;
+  final bool showLogo; // 是否显示台标/首字
 
   const ChannelList({
     Key? key,
@@ -16,6 +17,7 @@ class ChannelList extends StatelessWidget {
     required this.onSelect,
     required this.epgMap,
     this.showChannelNumber = false,
+    this.showLogo = true,
   }) : super(key: key);
 
   @override
@@ -36,8 +38,25 @@ class ChannelList extends StatelessWidget {
             }
           }
         }
-        // 频道号从 0001 开始
         final channelNumber = (index + 1).toString().padLeft(4, '0');
+        
+        // 获取台标（若有）或首字
+        Widget logoWidget;
+        if (showLogo) {
+          // 这里简化，实际可从 channel.logoUrl 加载，若无则显示首字
+          final firstChar = ch.name.isNotEmpty ? ch.name[0] : '?';
+          logoWidget = CircleAvatar(
+            radius: 14,
+            backgroundColor: Colors.grey[800],
+            child: Text(
+              firstChar,
+              style: TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          );
+        } else {
+          logoWidget = SizedBox.shrink();
+        }
+
         return ListTile(
           selected: isSelected,
           selectedTileColor: Colors.blue.withOpacity(0.3),
@@ -46,13 +65,21 @@ class ChannelList extends StatelessWidget {
                   channelNumber,
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 )
-              : null,
+              : (showLogo ? logoWidget : null),
           title: Text(
             ch.name,
-            style: TextStyle(color: isSelected ? Colors.yellow : Colors.white),
+            style: TextStyle(
+              color: isSelected ? Colors.yellow : Colors.white,
+              fontSize: 13,
+            ),
           ),
           subtitle: currentTitle != null
-              ? Text(currentTitle, style: TextStyle(fontSize: 11, color: Colors.grey))
+              ? Text(
+                  currentTitle,
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
               : null,
           onTap: () => onSelect(ch),
         );
