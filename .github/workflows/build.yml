@@ -58,13 +58,11 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 修补 screen_brightness_android 插件（如果仍存在兼容问题）
+      # 修补 screen_brightness_android 插件（如果存在）
       - name: Patch screen_brightness_android build.gradle.kts
         run: |
-          # 查找并修补 jvmTarget 错误
+          # 查找所有 screen_brightness_android 目录下的 build.gradle.kts 文件并修补
           find $HOME/.pub-cache/hosted/pub.dev/ -name "build.gradle.kts" -path "*/screen_brightness_android*/android/*" -exec sed -i 's/jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8/jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)/' {} \;
-          # 修补可能的 compilerOptions 错误（可选）
-          find $HOME/.pub-cache/hosted/pub.dev/ -name "build.gradle.kts" -path "*/screen_brightness_android*/android/*" -exec sed -i 's/compilerOptions {/kotlinOptions {/g' {} \;
           echo "✅ 修补完成"
 
       - name: Build Android APK (release)
