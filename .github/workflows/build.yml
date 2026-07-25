@@ -24,6 +24,9 @@ jobs:
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
+      - name: Repair pub cache
+        run: flutter pub cache repair
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -52,12 +55,11 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
+      - name: Repair pub cache
+        run: flutter pub cache repair
+
       - name: Install dependencies
         run: flutter pub get
-
-      # 生成应用图标
-      - name: Generate app icons
-        run: flutter pub run flutter_launcher_icons:main
 
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
