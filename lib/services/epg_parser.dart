@@ -7,8 +7,9 @@ import 'package:flutter/services.dart' show rootBundle;
 import '../models/epg_program.dart';
 
 class EpgParser {
-  static Map<String, String>? _aliasMap;
+  static Map<String, String>? _aliasMap; // key: channel name, value: epgid
   static Map<String, List<EpgProgram>>? _allPrograms;
+  static Map<String, String>? _channelIdMap; // key: display-name, value: channel-id
 
   static Future<Map<String, String>> loadAliasMap() async {
     if (_aliasMap != null) return _aliasMap!;
@@ -50,7 +51,6 @@ class EpgParser {
         await hashFile.writeAsString(remoteHash);
       }
     } catch (e) {
-      // 无hash，直接下载
       final response = await Dio().get(url);
       await cacheFile.writeAsString(response.data as String);
     }
@@ -58,19 +58,19 @@ class EpgParser {
     final xmlString = await cacheFile.readAsString();
     final document = XmlDocument.parse(xmlString);
     final allPrograms = <String, List<EpgProgram>>{};
-    final channelIdToName = <String, String>{};
-    final channelIdToIcon = <String, String>{};
+    final displayNameToChannelId = <String, String>{};
 
+    // 第一步：构建 display-name -> channel-id 映射
     for (var channel in document.findAllElements('channel')) {
       final id = channel.getAttribute('id')!;
       final displayNames = channel.findAllElements('display-name').map((e) => e.text.trim()).toList();
-      final icon = channel.findAllElements('icon').firstOrNull?.getAttribute('src');
-      if (displayNames.isNotEmpty) {
-        channelIdToName[id] = displayNames.first;
-        if (icon != null) channelIdToIcon[id] = icon;
+      for (var name in displayNames) {
+        displayNameToChannelId[name] = id;
       }
     }
+    _channelIdMap = displayNameToChannelId;
 
+    // 第二步：解析 programme，使用 channel id
     for (var prog in document.findAllElements('programme')) {
       final channelId = prog.getAttribute('channel')!;
       final startStr = prog.getAttribute('start')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
@@ -83,20 +83,19 @@ class EpgParser {
       allPrograms[channelId]!.add(EpgProgram(start: start, end: stop, title: title, desc: desc));
     }
 
-    // 应用别名映射
+    // 第三步：利用别名映射将直播频道名映射到 channel id
     final mapped = <String, List<EpgProgram>>{};
     for (var entry in _aliasMap!.entries) {
-      final alias = entry.key;
+      final channelName = entry.key;
       final epgid = entry.value;
-      if (allPrograms.containsKey(epgid)) {
-        mapped[alias] = allPrograms[epgid]!;
+      // 用 epgid 作为 display-name 查找 channel id
+      final channelId = displayNameToChannelId[epgid];
+      if (channelId != null && allPrograms.containsKey(channelId)) {
+        mapped[channelName] = allPrograms[channelId]!;
       }
     }
-    for (var entry in channelIdToName.entries) {
-      if (!mapped.containsKey(entry.value)) {
-        mapped[entry.value] = allPrograms[entry.key] ?? [];
-      }
-    }
+    // 额外：如果某些频道名没有在别名中，但也可能有节目，尝试直接匹配 display-name
+    // 但用户要求完全按别名，所以不额外添加
     _allPrograms = mapped;
     return _allPrograms!;
   }
