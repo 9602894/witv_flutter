@@ -1,6 +1,8 @@
+// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
+import '../services/config_service.dart';
 import '../services/playlist_parser.dart';
 import '../services/epg_parser.dart';
 import '../models/channel.dart';
@@ -32,43 +34,89 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadInitialSource();
-    _loadEpg();
+    _init();
   }
 
-  Future<void> _loadInitialSource() async {
-    final settings = Provider.of<SettingsService>(context, listen: false);
-    final selected = settings.subscriptions.where((s) => s.selected).toList();
-    if (selected.isNotEmpty) {
-      final url = selected.first.url;
-      final groupMap = await PlaylistParser.parseFromUrl(url);
-      setState(() {
-        groups = groupMap.keys.toList();
-        if (groups.isNotEmpty) {
-          currentGroup = groups.first;
-          channels = groupMap[currentGroup]!;
-          if (channels.isNotEmpty) currentChannel = channels.first;
-        }
-      });
+  Future<void> _init() async {
+    await _loadConfigAndEpg();
+    await _loadInitialSource();
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  Future<void> _loadConfigAndEpg() async {
+    try {
+      final config = await ConfigService.getConfig();
+      final epgUrl = config['EPG_URLS'] as String?;
+      if (epgUrl != null && epgUrl.isNotEmpty) {
+        final map = await EpgParser.loadAllEpg(epgUrl);
+        setState(() {
+          epgMap = map;
+        });
+      }
+    } catch (e) {
+      print('加载EPG失败: $e');
     }
   }
 
-  Future<void> _loadEpg() async {
-    final settings = Provider.of<SettingsService>(context, listen: false);
-    if (settings.epgUrl != null) {
-      final map = await EpgParser.loadAllEpg(settings.epgUrl!);
-      setState(() {
-        epgMap = map;
-      });
+  Future<void> _loadInitialSource() async {
+    try {
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      final selected = settings.subscriptions.where((s) => s.selected).toList();
+      if (selected.isNotEmpty) {
+        final url = selected.first.url;
+        final groupMap = await PlaylistParser.parseFromUrl(url);
+        setState(() {
+          groups = groupMap.keys.toList();
+          if (groups.isNotEmpty) {
+            currentGroup = groups.first;
+            channels = groupMap[currentGroup]!;
+            if (channels.isNotEmpty) currentChannel = channels.first;
+          }
+        });
+      }
+    } catch (e) {
+      print('加载源失败: $e');
+    }
+  }
+
+  Future<void> _loadGroup(String group) async {
+    try {
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      final selected = settings.subscriptions.where((s) => s.selected).toList();
+      if (selected.isNotEmpty) {
+        final url = selected.first.url;
+        final groupMap = await PlaylistParser.parseFromUrl(url);
+        setState(() {
+          groups = groupMap.keys.toList();
+          if (groups.isNotEmpty) {
+            currentGroup = group;
+            channels = groupMap[group] ?? [];
+            if (channels.isNotEmpty && currentChannel == null) {
+              currentChannel = channels.first;
+            }
+          }
+        });
+      }
+    } catch (e) {
+      print('加载分组失败: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       body: Stack(
         children: [
@@ -86,8 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: Colors.black54,
                 child: Row(
                   children: [
-                    // 订阅源列表（简化为一个固定订阅源，此处省略订阅切换UI）
-                    // 直接显示分组列表
+                    // 分组列表（占左侧）
                     Expanded(
                       flex: (subWeight * 10).toInt(),
                       child: GroupList(
@@ -96,16 +143,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         onSelect: (group) {
                           setState(() {
                             currentGroup = group;
-                            final map = Provider.of<SettingsService>(context, listen: false);
-                            // 重新加载该分组频道（简单处理：从已有数据中过滤）
-                            // 实际应缓存所有频道数据，这里简化
-                            // 我们重新解析整个源
                             _loadGroup(group);
                           });
                         },
                       ),
                     ),
                     VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
+                    // 频道列表（占右侧）
                     Expanded(
                       flex: (channelWeight * 10).toInt(),
                       child: ChannelList(
@@ -150,7 +194,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(color: Colors.transparent),
             ),
           ),
-          // 工具栏
+          // 顶部工具栏
           Positioned(
             top: 0,
             right: 0,
@@ -166,7 +210,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 IconButton(
                   icon: Icon(Icons.settings, color: Colors.white),
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen())),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SettingsScreen()),
+                  ),
                 ),
               ],
             ),
@@ -188,24 +235,22 @@ class _HomeScreenState extends State<HomeScreen> {
               channelWeight = 1 - subWeight - groupWeight;
             }),
           ),
-          // 左上角显示网速（可选）
+          // 网速显示
           if (currentSpeed > 0)
             Positioned(
               top: 50,
               left: 10,
-              child: Text(
-                '${currentSpeed.toStringAsFixed(1)} KB/s',
-                style: TextStyle(color: Colors.white, fontSize: 12, background: Paint()..color = Colors.black54),
+              child: Container(
+                color: Colors.black54,
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  '${currentSpeed.toStringAsFixed(1)} KB/s',
+                  style: TextStyle(color: Colors.white, fontSize: 12),
+                ),
               ),
             ),
         ],
       ),
     );
-  }
-
-  void _loadGroup(String group) {
-    // 重新解析并加载该分组（简单实现：重新解析全部）
-    // 实际可缓存完整数据
-    _loadInitialSource();
   }
 }
