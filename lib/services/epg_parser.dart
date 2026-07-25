@@ -92,8 +92,33 @@ class EpgParser {
         String startStr = prog.getAttribute('start')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
         String stopStr = prog.getAttribute('stop')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
         try {
-          final start = DateTime.parse(startStr);
-          final stop = DateTime.parse(stopStr);
+          // 支持 yyyyMMddHHmmss 格式（无分隔符）
+          DateTime start, stop;
+          if (startStr.contains(RegExp(r'^\d{14}$'))) {
+            start = DateTime(
+              int.parse(startStr.substring(0, 4)),
+              int.parse(startStr.substring(4, 6)),
+              int.parse(startStr.substring(6, 8)),
+              int.parse(startStr.substring(8, 10)),
+              int.parse(startStr.substring(10, 12)),
+              int.parse(startStr.substring(12, 14)),
+            );
+          } else {
+            start = DateTime.parse(startStr);
+          }
+          if (stopStr.contains(RegExp(r'^\d{14}$'))) {
+            stop = DateTime(
+              int.parse(stopStr.substring(0, 4)),
+              int.parse(stopStr.substring(4, 6)),
+              int.parse(stopStr.substring(6, 8)),
+              int.parse(stopStr.substring(8, 10)),
+              int.parse(stopStr.substring(10, 12)),
+              int.parse(stopStr.substring(12, 14)),
+            );
+          } else {
+            stop = DateTime.parse(stopStr);
+          }
+
           final title = prog.findAllElements('title').firstOrNull?.text.trim() ?? '';
           final desc = prog.findAllElements('desc').firstOrNull?.text.trim() ?? '';
           allPrograms.putIfAbsent(channelId, () => []);
