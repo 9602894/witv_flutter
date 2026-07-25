@@ -74,6 +74,7 @@ class _ScheduleViewState extends State<ScheduleView> {
 
     return Row(
       children: [
+        // 左侧频道列表（可编辑宽度，但在此为了简单固定比例）
         Expanded(
           flex: 2,
           child: ChannelList(
@@ -88,6 +89,7 @@ class _ScheduleViewState extends State<ScheduleView> {
           flex: 3,
           child: Column(
             children: [
+              // 日期标签
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -116,12 +118,31 @@ class _ScheduleViewState extends State<ScheduleView> {
                   itemCount: dayPrograms.length,
                   itemBuilder: (context, index) {
                     final prog = dayPrograms[index];
-                    final isCurrent = prog.start.isBefore(DateTime.now()) && prog.end.isAfter(DateTime.now());
-                    return ListTile(
-                      tileColor: isCurrent ? Colors.blue.withOpacity(0.3) : null,
-                      leading: Text('${prog.start.hour}:${prog.start.minute}'),
-                      title: Text(prog.title),
-                      subtitle: prog.desc != null ? Text(prog.desc!) : null,
+                    final now = DateTime.now();
+                    final isCurrent = prog.start.isBefore(now) && prog.end.isAfter(now);
+                    // 格式化时间：开始-结束
+                    final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
+                    return Container(
+                      color: isCurrent ? Colors.blue.withOpacity(0.4) : Colors.transparent,
+                      child: ListTile(
+                        leading: Text(
+                          timeStr,
+                          style: TextStyle(
+                            color: isCurrent ? Colors.yellow : Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        title: Text(
+                          prog.title,
+                          style: TextStyle(
+                            color: isCurrent ? Colors.yellow : Colors.white,
+                            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: prog.desc != null && prog.desc!.isNotEmpty
+                            ? Text(prog.desc!, style: TextStyle(fontSize: 11, color: Colors.white60))
+                            : null,
+                      ),
                     );
                   },
                 ),
@@ -131,6 +152,10 @@ class _ScheduleViewState extends State<ScheduleView> {
         ),
       ],
     );
+  }
+
+  String _formatTime(DateTime dt) {
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   String _formatDayLabel(String dateStr) {
