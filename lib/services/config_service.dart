@@ -16,7 +16,6 @@ class ConfigService {
       String jsonString;
       if (await file.exists()) {
         jsonString = await file.readAsString();
-        // 尝试解析
         try {
           final raw = jsonDecode(jsonString) as Map<String, dynamic>;
           if (raw.containsKey('Configuration')) {
@@ -26,10 +25,9 @@ class ConfigService {
           }
         } catch (e) {
           await LogService.write('外部配置文件解析失败: $e，从 assets 重新复制');
-          await file.delete(); // 删除损坏文件
+          await file.delete();
         }
       }
-      // 从 assets 复制
       jsonString = await rootBundle.loadString('assets/$configFileName');
       await file.writeAsString(jsonString);
       final raw = jsonDecode(jsonString) as Map<String, dynamic>;
@@ -42,12 +40,12 @@ class ConfigService {
     return _config!;
   }
 
-  // 以下方法不变...
   static Future<void> saveConfig(Map<String, dynamic> config) async {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$configFileName');
     await file.writeAsString(jsonEncode(config));
     _config = config;
+    await LogService.write('配置已保存');
   }
 
   static Future<void> resetToDefault() async {
@@ -56,6 +54,7 @@ class ConfigService {
     final file = File('${dir.path}/$configFileName');
     await file.writeAsString(jsonString);
     _config = jsonDecode(jsonString) as Map<String, dynamic>;
+    await LogService.write('重置为默认配置');
   }
 
   static Future<void> backup() async {
@@ -66,6 +65,7 @@ class ConfigService {
     if (!await backupDir.exists()) await backupDir.create();
     final backupFile = File('${backupDir.path}/${DateTime.now().millisecondsSinceEpoch}_$configFileName');
     await src.copy(backupFile.path);
+    await LogService.write('备份完成');
   }
 
   static Future<List<File>> getBackupFiles() async {
@@ -80,5 +80,6 @@ class ConfigService {
     final target = File('${dir.path}/$configFileName');
     await backupFile.copy(target.path);
     _config = jsonDecode(await target.readAsString()) as Map<String, dynamic>;
+    await LogService.write('从备份恢复完成');
   }
 }
