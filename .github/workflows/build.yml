@@ -8,7 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ---------- Windows 构建 ----------
   build-windows:
     name: Build Windows (x64)
     runs-on: windows-latest
@@ -40,7 +39,6 @@ jobs:
           name: witv-windows-x64
           path: build/windows/x64/runner/Release/
 
-  # ---------- Android 构建 ----------
   build-android:
     name: Build Android (APK)
     runs-on: ubuntu-latest
@@ -60,20 +58,33 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 🔧 修补 screen_brightness_android 插件的 Kotlin DSL 编译错误
+      # 🔧 强制修补 screen_brightness_android 插件
       - name: Patch screen_brightness_android build.gradle.kts
         run: |
-          # 定位插件文件
+          # 找到插件的 build.gradle.kts 文件
           PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -name "build.gradle.kts" -path "*/screen_brightness_android*/android/*" | head -n 1)
-          if [ -n "$PLUGIN_FILE" ]; then
-            echo "正在修补文件: $PLUGIN_FILE"
-            # 修复 jvmTarget 赋值错误
-            sed -i 's/jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8/jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)/' "$PLUGIN_FILE"
-            # 修复 compilerOptions 块语法错误
-            sed -i 's/compilerOptions {/kotlinOptions {/g' "$PLUGIN_FILE"
-            echo "✅ 修补完成"
+          if [ -z "$PLUGIN_FILE" ]; then
+            echo "❌ 未找到 screen_brightness_android 插件文件"
+            exit 1
+          fi
+          echo "📄 找到文件: $PLUGIN_FILE"
+          
+          # 备份原文件
+          cp "$PLUGIN_FILE" "$PLUGIN_FILE.bak"
+          
+          # 修复 jvmTarget 赋值错误
+          sed -i 's/jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8/jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)/' "$PLUGIN_FILE"
+          
+          # 修复 compilerOptions 错误（如果存在）
+          sed -i 's/compilerOptions {/kotlinOptions {/g' "$PLUGIN_FILE"
+          
+          # 验证修改是否成功
+          if grep -q 'jvmTarget.set' "$PLUGIN_FILE"; then
+            echo "✅ 修补成功"
           else
-            echo "⚠️ 未找到 screen_brightness_android 插件文件，跳过修补"
+            echo "❌ 修补失败，jvmTarget 仍为旧语法"
+            cat "$PLUGIN_FILE" | grep -n "jvmTarget"
+            exit 1
           fi
 
       - name: Build Android APK (release)
@@ -85,12 +96,10 @@ jobs:
           name: witv-android-apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
-  # ---------- 发布 Release（可选） ----------
   release:
     name: Create Release and Upload Assets
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
-    # 仅当推送 tag（如 v1.0.0）时触发
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download Windows artifact
