@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Ensure Windows project exists
+      - name: Ensure Windows project exists (optional)
         run: flutter create --platforms=windows .
 
       - name: Build Windows release
@@ -55,9 +55,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Ensure Android project exists
-        run: flutter create --platforms=android .
-
+      # 删除有问题的插件（如果存在）
       - name: Remove problematic plugins
         run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
 
