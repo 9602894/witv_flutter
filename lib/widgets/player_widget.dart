@@ -5,7 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 class PlayerWidget extends StatefulWidget {
   final String url;
-  final VoidCallback onError;
+  final VoidCallback onError;  // 无参回调
   final Function(double speed) onSpeedUpdate;
 
   const PlayerWidget({Key? key, required this.url, required this.onError, required this.onSpeedUpdate}) : super(key: key);
@@ -31,8 +31,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _play() {
     player.open(Media(widget.url));
     player.stream.buffer.listen((buffer) {
-      if (buffer > 0) {
-        final speed = buffer / 1024; // KB/s
+      // buffer 是 Duration 类型
+      if (buffer.inMilliseconds > 0) {
+        final speed = buffer.inMilliseconds / 1024; // 转换为 KB/s
         widget.onSpeedUpdate(speed);
       }
     });
