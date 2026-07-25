@@ -82,7 +82,6 @@ class _ScheduleViewState extends State<ScheduleView> {
 
     return Row(
       children: [
-        // 左侧频道列表
         Expanded(
           flex: (widget.leftWeight * 100).toInt(),
           child: ChannelList(
@@ -92,14 +91,11 @@ class _ScheduleViewState extends State<ScheduleView> {
             epgMap: widget.epgMap,
           ),
         ),
-        // 拖拽分隔条（编辑模式可见）
         _buildDragBar(),
-        // 右侧EPG列表
         Expanded(
           flex: (widget.rightWeight * 100).toInt(),
           child: Column(
             children: [
-              // 日期标签
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
