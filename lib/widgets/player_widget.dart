@@ -36,7 +36,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      // 使用默认配置，自动硬件解码
+      // 使用默认配置（自动硬件解码）
       player = Player();
       controller = VideoController(player);
       _isInitialized = true;
