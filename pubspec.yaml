@@ -9,7 +9,7 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 播放器核心（支持 Windows/Android/Linux/macOS）
+  # 播放器核心
   media_kit: ^1.1.10
   media_kit_video: ^1.2.4
   media_kit_native_event_loop: ^1.0.8
@@ -17,7 +17,7 @@ dependencies:
   # 网络请求
   dio: ^5.4.0
 
-  # XML 解析（EPG）
+  # XML 解析
   xml: ^6.5.0
 
   # JSON 序列化
@@ -29,14 +29,15 @@ dependencies:
   # 状态管理
   provider: ^6.1.1
 
-  # 文件路径（用于缓存）
+  # 文件路径
   path_provider: ^2.1.2
 
   # SVG 图标（可选）
   flutter_svg: ^2.0.9
 
-  # 屏幕亮度调节（如果不需要可删除此行）
-  # screen_brightness: ^2.0.0   # 注释掉，避免编译问题
+  # 屏幕亮度调节（间接依赖问题，通过覆盖解决）
+  # 注意：如果您的应用确实不需要，可删除此依赖，但某些插件可能仍会拉取，因此覆盖版本保证兼容
+  screen_brightness: ^2.0.0   # 保留，但使用覆盖版本强制兼容
 
 dev_dependencies:
   flutter_test:
@@ -49,6 +50,7 @@ flutter:
     - assets/configuration.json
     - assets/epg_data.json
 
-# 如果保留了 screen_brightness，可在此覆盖版本以解决兼容性问题
-# dependency_overrides:
-#   screen_brightness: 2.2.0+1   # 使用兼容版本
+# 强制使用兼容版本，解决 Kotlin DSL 编译错误
+dependency_overrides:
+  screen_brightness: 2.2.0+1
+  # 如有其他插件冲突可在此添加
