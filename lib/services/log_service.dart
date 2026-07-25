@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart'; // 可选，如需分享功能
 
 class LogService {
   static final LogService _instance = LogService._internal();
@@ -10,18 +9,36 @@ class LogService {
   static const String logFileName = 'witv_log.txt';
   static File? _logFile;
 
-  /// 初始化日志文件
+  /// 初始化日志文件（优先使用外部存储，若不可用则回退内部）
   static Future<void> init() async {
-    final dir = await getApplicationDocumentsDirectory();
-    _logFile = File('${dir.path}/$logFileName');
+    try {
+      // 尝试获取外部存储目录（应用专属）
+      final externalDir = await getExternalStorageDirectory();
+      if (externalDir != null) {
+        _logFile = File('${externalDir.path}/$logFileName');
+      } else {
+        // 回退到内部文档目录
+        final internalDir = await getApplicationDocumentsDirectory();
+        _logFile = File('${internalDir.path}/$logFileName');
+      }
+    } catch (e) {
+      // 若失败，使用内部目录
+      final internalDir = await getApplicationDocumentsDirectory();
+      _logFile = File('${internalDir.path}/$logFileName');
+    }
+
+    // 如果文件超过1MB，重命名旧文件
     if (await _logFile!.exists()) {
       final size = await _logFile!.length();
-      if (size > 1024 * 1024) { // 超过1MB滚动
-        await _logFile!.rename('${dir.path}/witv_log_${DateTime.now().millisecondsSinceEpoch}.txt');
+      if (size > 1024 * 1024) {
+        final dir = _logFile!.parent;
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final newName = 'witv_log_$timestamp.txt';
+        await _logFile!.rename('${dir.path}/$newName');
         _logFile = File('${dir.path}/$logFileName');
       }
     }
-    await write('=== 日志系统初始化 ===');
+    await write('=== 日志系统初始化，日志路径: ${_logFile!.path} ===');
   }
 
   /// 写入日志
@@ -42,28 +59,10 @@ class LogService {
     await write(message);
   }
 
-  /// 读取完整日志
+  /// 读取完整日志（用于调试）
   static Future<String> read() async {
     if (_logFile == null) await init();
     if (!await _logFile!.exists()) return '';
     return await _logFile!.readAsString();
-  }
-
-  /// 清空日志
-  static Future<void> clear() async {
-    if (_logFile == null) await init();
-    await _logFile!.writeAsString('');
-    await write('日志已清空');
-  }
-
-  /// 导出日志到外部存储（用于分享或保存）
-  static Future<File> export() async {
-    if (_logFile == null) await init();
-    final dir = await getExternalStorageDirectory();
-    final exportDir = dir ?? await getApplicationDocumentsDirectory();
-    final exportFile = File('${exportDir.path}/witv_log_${DateTime.now().millisecondsSinceEpoch}.txt');
-    final content = await read();
-    await exportFile.writeAsString(content);
-    return exportFile;
   }
 }
