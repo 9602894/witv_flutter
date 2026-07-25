@@ -45,9 +45,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = true;
   bool _hasSubscriptions = false;
 
-  // 缓存所有订阅源数据
-  Map<String, Map<String, List<Channel>>> _subscriptionCache = {};
-
   @override
   void initState() {
     super.initState();
@@ -101,7 +98,6 @@ class _HomeScreenState extends State<HomeScreen> {
             // ---------- 播放器 ----------
             if (currentChannel != null)
               PlayerWidget(
-                key: ValueKey(currentChannel!.url), // 确保URL变化时重建
                 url: currentChannel!.url,
                 onError: () => LogService.write('播放器错误回调'),
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
@@ -145,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.transparent,
                   child: Row(
                     children: [
+                      // 第一列：订阅源
                       Expanded(
                         flex: (subWeight * 100).toInt(),
                         child: _buildSubscriptionList(),
@@ -169,6 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
+                      // 第二列：分组
                       Expanded(
                         flex: (groupWeight * 100).toInt(),
                         child: _buildGroupList(),
@@ -193,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
+                      // 第三列：频道列表 + 节目单按钮
                       Expanded(
                         flex: (channelWeight * 100).toInt(),
                         child: Stack(
@@ -215,6 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 showLogo: true,
                               ),
                             ),
+                            // 竖排“节目单”按钮
                             Positioned(
                               right: 0,
                               top: 0,
@@ -278,6 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           isEditMode: isEditMode,
                         ),
                       ),
+                      // 竖排“频道组”返回按钮
                       Positioned(
                         top: 8,
                         left: 8,
@@ -492,7 +493,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () {
               LogService.write('切换订阅源: ${sub.name}');
               settings.toggleSelected(sub);
-              // 使用 compute 或异步加载
               _loadSubscriptionData(sub);
             },
           );
@@ -501,52 +501,44 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 加载订阅源数据（异步，不阻塞UI） ==========
+  // ========== 加载订阅源数据 ==========
   Future<void> _loadSubscriptionData(Subscription sub) async {
     try {
       LogService.write('加载订阅源数据: ${sub.name}');
       final url = sub.url;
-      // 先检查缓存
       final cacheFile = await PlaylistParser.getCacheFile(url, sub.name);
       Map<String, List<Channel>> groupMap;
       if (await cacheFile.exists()) {
-        LogService.write('从缓存加载: ${cacheFile.path}');
         final content = await cacheFile.readAsString();
         groupMap = PlaylistParser.parseFromString(content);
       } else {
-        LogService.write('从网络下载: $url');
         groupMap = await PlaylistParser.parseFromUrl(url);
         await PlaylistParser.saveCache(groupMap, url, sub.name);
       }
 
-      // 更新状态
-      if (mounted) {
-        setState(() {
-          groups = groupMap.keys.toList();
-          if (groups.isNotEmpty) {
-            // 保留当前分组，若不存在则选第一个
-            if (currentGroup == null || !groups.contains(currentGroup)) {
-              currentGroup = groups.first;
-            }
-            channels = groupMap[currentGroup]!;
-            if (channels.isNotEmpty) {
-              final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
-              if (lastChannel != null) {
-                final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
-                currentChannel = found;
-              } else {
-                currentChannel = channels.first;
-              }
-              _showEpgInfo = true;
-            }
+      setState(() {
+        groups = groupMap.keys.toList();
+        if (groups.isNotEmpty) {
+          if (currentGroup == null || !groups.contains(currentGroup)) {
+            currentGroup = groups.first;
           }
-          currentSubName = sub.name;
-        });
-        LogService.write('订阅源加载完成，分组数: ${groups.length}，频道数: ${channels.length}');
-      }
+          channels = groupMap[currentGroup]!;
+          if (channels.isNotEmpty) {
+            final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
+            if (lastChannel != null) {
+              final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
+              currentChannel = found;
+            } else {
+              currentChannel = channels.first;
+            }
+            _showEpgInfo = true;
+          }
+        }
+        currentSubName = sub.name;
+      });
+      LogService.write('订阅源加载完成，分组数: ${groups.length}，频道数: ${channels.length}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      // 出错时保持原有数据不变
     }
   }
 
@@ -572,11 +564,12 @@ class _HomeScreenState extends State<HomeScreen> {
               LogService.write('切换到分组: $group');
               setState(() {
                 currentGroup = group;
-                // 重新加载当前订阅源的分组数据
+                // 更新频道列表
                 final settings = Provider.of<SettingsService>(context, listen: false);
                 final selected = settings.subscriptions.where((s) => s.selected).toList();
                 if (selected.isNotEmpty) {
-                  _loadSubscriptionData(selected.first);
+                  final sub = selected.first;
+                  _loadSubscriptionData(sub);
                 }
               });
             },
@@ -776,10 +769,15 @@ class _HomeScreenState extends State<HomeScreen> {
             return {};
           },
         );
-        setState(() {
-          epgMap = map;
+        // 延迟 setState，避免阻塞 UI
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              epgMap = map;
+            });
+            LogService.write('EPG加载成功，频道数: ${map.length}');
+          }
         });
-        LogService.write('EPG加载成功，频道数: ${map.length}');
       }
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
