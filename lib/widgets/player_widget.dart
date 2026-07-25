@@ -39,32 +39,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      final settings = Provider.of<SettingsService>(context, listen: false);
-      _currentDecoder = settings.decoderIndex;
-
-      // 解码映射：0=系统（auto），1=硬解（true），2=软解（false）
-      // 其他值暂映射为硬解/软解组合
-      bool? hardwareDecoding;
-      if (_currentDecoder == 1 || _currentDecoder == 3 || _currentDecoder == 5) {
-        hardwareDecoding = true; // 硬解
-      } else if (_currentDecoder == 2 || _currentDecoder == 4 || _currentDecoder == 6) {
-        hardwareDecoding = false; // 软解
-      } else {
-        hardwareDecoding = null; // 系统自动
-      }
-
-      final config = PlayerConfiguration(
-        hardwareDecoding: hardwareDecoding,
-        bufferDuration: Duration(milliseconds: 5000),
-        bufferSize: 8192,
-      );
-
-      player = Player(configuration: config);
+      // 只使用默认 Player()，不传递任何配置，避免版本兼容性问题
+      player = Player();
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功，解码模式: $_currentDecoder');
+      LogService.write('Player 初始化成功（无自定义参数）');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -119,6 +100,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 检测解码方式变化，重启播放器
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.decoderIndex != _currentDecoder) {
       _currentDecoder = settings.decoderIndex;
