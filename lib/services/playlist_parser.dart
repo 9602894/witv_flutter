@@ -82,11 +82,16 @@ class PlaylistParser {
     await file.writeAsString(content);
     await LogService.write('缓存已保存: ${file.path}');
     // 删除旧缓存（保留最近5个）
-    final files = await cacheDir.list().where((entity) => entity is File).map((e) => e as File).toList();
-    files.sort((a,b) => a.lastModifiedSync().compareTo(b.lastModifiedSync()));
-    while (files.length > 5) {
-      await files.first.delete();
-      files.removeAt(0);
+    try {
+      final files = await cacheDir.list().toList();
+      final fileList = files.whereType<File>().toList();
+      fileList.sort((a, b) => a.lastModifiedSync().compareTo(b.lastModifiedSync()));
+      while (fileList.length > 5) {
+        await fileList.first.delete();
+        fileList.removeAt(0);
+      }
+    } catch (e) {
+      await LogService.write('清理缓存失败: $e');
     }
   }
 
