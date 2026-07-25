@@ -36,19 +36,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      // 配置播放器：硬件解码、大缓冲、降低卡顿
-      final config = PlayerConfiguration(
-        hardwareDecoding: true, // 开启硬解
-        bufferDuration: Duration(milliseconds: 5000), // 缓冲5秒
-        bufferSize: 4096,
-        volume: 1.0,
-      );
-      player = Player(configuration: config);
+      // 使用默认配置，自动硬件解码
+      player = Player();
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功（硬件解码）');
+      LogService.write('Player 初始化成功');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -118,7 +112,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized) {
       return Container(color: Colors.black);
     }
-    // 设置视频填充模式，避免绿边，并保持比例
     return Video(
       controller: controller,
       fit: BoxFit.contain,
