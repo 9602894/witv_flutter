@@ -43,24 +43,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       final decoder = settings.decoderIndex;
       _currentDecoder = decoder;
 
-      // 解码配置
-      bool? hardwareDecoding;
-      if (decoder == 1) hardwareDecoding = true;      // 硬解
-      else if (decoder == 2) hardwareDecoding = false; // 软解
-      // decoder == 0 自动，不设置 hardwareDecoding
-
-      final config = PlayerConfiguration(
-        hardwareDecoding: hardwareDecoding,
-        bufferDuration: Duration(milliseconds: 5000),
-        bufferSize: 8192,
-      );
-
-      player = Player(configuration: config);
+      // 使用默认配置（不传递任何参数，避免不支持的参数）
+      player = Player();
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功，解码模式: $decoder');
+      LogService.write('Player 初始化成功，解码模式设置: $decoder (实际由 media_kit 自动选择)');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -117,24 +106,15 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     super.didUpdateWidget(oldWidget);
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.decoderIndex != _currentDecoder) {
-      LogService.write('解码器变更，重启播放器');
+      LogService.write('解码器设置变更，但 media_kit 1.1.10 不支持动态切换，需要重启应用');
       _currentDecoder = settings.decoderIndex;
-      _recreatePlayer();
-      return;
+      // 仅记录，实际不重启播放器，因为无法改变解码方式
     }
     if (oldWidget.url != widget.url && _isInitialized) {
       _currentUrl = widget.url;
       LogService.write('切换频道: ${widget.url}');
       player.open(Media(widget.url));
     }
-  }
-
-  void _recreatePlayer() {
-    if (_isInitialized) {
-      player.dispose();
-    }
-    _isInitialized = false;
-    _initPlayer();
   }
 
   @override
