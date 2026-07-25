@@ -55,14 +55,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # 生成应用图标
+      - name: Generate app icons
+        run: flutter pub run flutter_launcher_icons:main
+
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 删除有问题的插件（如果存在）
       - name: Remove problematic plugins
         run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
-
-      # 不再复制图标，使用系统默认图标
 
       - name: Build Android APK (release)
         run: flutter build apk --release
