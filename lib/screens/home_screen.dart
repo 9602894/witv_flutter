@@ -32,9 +32,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isEditMode = false;
   bool _showRightMenu = false;
 
-  double subWeight = 0.2;
-  double groupWeight = 0.2;
-  double channelWeight = 0.6;
+  // 三个窗口的宽度权重（总和为1）
+  double subWeight = 0.15;   // 订阅列表
+  double groupWeight = 0.2;  // 分组列表
+  double channelWeight = 0.65; // 频道列表
 
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
@@ -85,24 +86,53 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
         body: Stack(
           children: [
-            // 播放器（使用 ValueKey 强制重建）
+            // 播放器（去掉 key，实现复用）
             if (currentChannel != null)
               PlayerWidget(
-                key: ValueKey(currentChannel!.url), // 关键：URL变化时重建
                 url: currentChannel!.url,
                 onError: () => LogService.write('播放器错误回调'),
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // 主覆盖层（分组+频道列表）
+            // 主覆盖层（订阅列表 + 分组 + 频道）
             if (showOverlay && !isScheduleMode)
               Positioned.fill(
                 child: Container(
                   color: Colors.black54,
                   child: Row(
                     children: [
+                      // 订阅列表（左侧）
                       Expanded(
-                        flex: (subWeight * 10).toInt(),
+                        flex: (subWeight * 100).toInt(),
+                        child: _buildSubscriptionList(),
+                      ),
+                      // 拖拽分隔条1（订阅 ↔ 分组）
+                      _buildDragBar(
+                        onDrag: (delta) {
+                          setState(() {
+                            // 调整 subWeight 和 groupWeight
+                            double newSub = subWeight + delta;
+                            double newGroup = groupWeight - delta;
+                            if (newSub < 0.05) newSub = 0.05;
+                            if (newGroup < 0.05) newGroup = 0.05;
+                            subWeight = newSub;
+                            groupWeight = newGroup;
+                            channelWeight = 1 - subWeight - groupWeight;
+                            if (channelWeight < 0.05) {
+                              channelWeight = 0.05;
+                              // 重新调整
+                              double total = subWeight + groupWeight;
+                              subWeight = subWeight / total * 0.95;
+                              groupWeight = groupWeight / total * 0.95;
+                              channelWeight = 0.05;
+                            }
+                          });
+                        },
+                        isEditMode: isEditMode,
+                      ),
+                      // 分组列表
+                      Expanded(
+                        flex: (groupWeight * 100).toInt(),
                         child: GroupList(
                           groups: groups,
                           selectedGroup: currentGroup,
@@ -114,9 +144,31 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                         ),
                       ),
-                      VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
+                      // 拖拽分隔条2（分组 ↔ 频道）
+                      _buildDragBar(
+                        onDrag: (delta) {
+                          setState(() {
+                            double newGroup = groupWeight + delta;
+                            double newChannel = channelWeight - delta;
+                            if (newGroup < 0.05) newGroup = 0.05;
+                            if (newChannel < 0.05) newChannel = 0.05;
+                            groupWeight = newGroup;
+                            channelWeight = newChannel;
+                            subWeight = 1 - groupWeight - channelWeight;
+                            if (subWeight < 0.05) {
+                              subWeight = 0.05;
+                              double total = groupWeight + channelWeight;
+                              groupWeight = groupWeight / total * 0.95;
+                              channelWeight = channelWeight / total * 0.95;
+                              subWeight = 0.05;
+                            }
+                          });
+                        },
+                        isEditMode: isEditMode,
+                      ),
+                      // 频道列表
                       Expanded(
-                        flex: (channelWeight * 10).toInt(),
+                        flex: (channelWeight * 100).toInt(),
                         child: ChannelList(
                           channels: channels,
                           selectedChannel: currentChannel,
@@ -233,23 +285,32 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // 编辑工具栏
+            // 编辑工具栏（显示当前权重值）
             if (isEditMode)
-              EditToolbar(
-                isEditMode: isEditMode,
-                onExit: () => setState(() => isEditMode = false),
-                subWeight: subWeight,
-                onSubWeightChange: (v) => setState(() {
-                  subWeight = v;
-                  groupWeight = (1 - subWeight) * 0.5;
-                  channelWeight = 1 - subWeight - groupWeight;
-                }),
-                groupWeight: groupWeight,
-                onGroupWeightChange: (v) => setState(() {
-                  groupWeight = v;
-                  subWeight = (1 - groupWeight) * 0.5;
-                  channelWeight = 1 - subWeight - groupWeight;
-                }),
+              Positioned(
+                top: 50,
+                left: 0,
+                right: 0,
+                child: Container(
+                  color: Colors.black.withOpacity(0.7),
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('订阅 ${(subWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      SizedBox(width: 16),
+                      Text('分组 ${(groupWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      SizedBox(width: 16),
+                      Text('频道 ${(channelWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      SizedBox(width: 16),
+                      ElevatedButton(
+                        onPressed: () => setState(() => isEditMode = false),
+                        child: Text('退出编辑', style: TextStyle(fontSize: 12)),
+                        style: ElevatedButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2)),
+                      ),
+                    ],
+                  ),
+                ),
               ),
 
             // 网速显示
@@ -268,6 +329,59 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  // 订阅列表（可切换订阅源）
+  Widget _buildSubscriptionList() {
+    final settings = Provider.of<SettingsService>(context);
+    final subs = settings.subscriptions;
+    if (subs.isEmpty) {
+      return Center(
+        child: Text(
+          '无订阅',
+          style: TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      );
+    }
+    return Container(
+      color: Colors.black45,
+      child: ListView.builder(
+        itemCount: subs.length,
+        itemBuilder: (context, index) {
+          final sub = subs[index];
+          final isSelected = sub.selected;
+          return ListTile(
+            title: Text(
+              sub.name,
+              style: TextStyle(
+                color: isSelected ? Colors.yellow : Colors.white,
+                fontSize: 12,
+              ),
+            ),
+            onTap: () {
+              // 切换选中状态
+              settings.toggleSelected(sub);
+              // 重新加载
+              _reloadData();
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDragBar({required Function(double delta) onDrag, required bool isEditMode}) {
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        if (!isEditMode) return;
+        final delta = details.delta.dx / MediaQuery.of(context).size.width;
+        onDrag(delta);
+      },
+      child: Container(
+        width: 4,
+        color: isEditMode ? Colors.yellow : Colors.transparent,
       ),
     );
   }
@@ -365,6 +479,18 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
     }
+  }
+
+  Future<void> _reloadData() async {
+    LogService.write('刷新数据');
+    setState(() {
+      isLoading = true;
+    });
+    await _loadInitialSource();
+    _checkSubscriptions();
+    setState(() {
+      isLoading = false;
+    });
   }
 
   void _checkSubscriptions() {
