@@ -37,32 +37,45 @@ class _HomeScreenState extends State<HomeScreen> {
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
-  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    // 在 initState 中不加载，等到 didChangeDependencies
+    _init();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_initialized) {
-      _initialized = true;
-      _init();
+    // 每次依赖变化（例如从设置页返回）检查是否需要刷新
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    if (settings.needsRefresh) {
+      settings.clearRefreshFlag();
+      _reloadData();
     }
-    // 监听 SettingsService 变化，当订阅列表变化时重新加载
-    Provider.of<SettingsService>(context, listen: true);
   }
 
   Future<void> _init() async {
     await _loadConfigAndEpg();
     await _loadInitialSource();
+    _checkSubscriptions();
+  }
+
+  Future<void> _reloadData() async {
+    setState(() {
+      isLoading = true;
+    });
+    await _loadInitialSource();
+    _checkSubscriptions();
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  void _checkSubscriptions() {
     final settings = Provider.of<SettingsService>(context, listen: false);
     final hasSelected = settings.subscriptions.any((s) => s.selected);
     setState(() {
-      isLoading = false;
       _hasSubscriptions = hasSelected || channels.isNotEmpty;
     });
     if (!_hasSubscriptions) {
@@ -102,7 +115,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadConfigAndEpg() async {
     try {
       final config = await ConfigService.getConfig();
-      final epgUrl = config['EPG_URLS'] as String?;
+      final inner = config['Configuration'] as Map<String, dynamic>?;
+      final epgUrl = inner?['EPG_URLS'] as String?;
       if (epgUrl != null && epgUrl.isNotEmpty) {
         final map = await EpgParser.loadAllEpg(epgUrl);
         setState(() {
@@ -130,12 +144,9 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
       } else {
-        // 无选中订阅，清空频道列表
         setState(() {
           channels = [];
           groups = [];
-          currentChannel = null;
-          currentGroup = null;
         });
       }
     } catch (e) {
@@ -168,17 +179,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 监听 SettingsService 变化，并在变化时重新加载源（如果当前没有频道且已加载完成）
-    final settings = Provider.of<SettingsService>(context);
-    // 当订阅列表变化且页面已加载完成时，重新加载
-    // 但为了不频繁刷新，我们可以在订阅变化时设置一个标志，但简单起见，每次 build 时检查是否有选中订阅但频道为空
-    if (!isLoading && settings.subscriptions.any((s) => s.selected) && channels.isEmpty) {
-      // 延迟一帧执行，避免无限循环
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadInitialSource();
-      });
-    }
-
     if (isLoading) {
       return Scaffold(
         body: Center(child: CircularProgressIndicator()),
