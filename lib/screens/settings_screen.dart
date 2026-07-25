@@ -15,7 +15,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? config;
   bool isLoading = true;
 
-  // 解码方式列表（与 configuration.json 中 #22 一致）
+  // 解码方式列表（与 configuration.json #22 一致，保留 UI）
   final List<String> decoderNames = [
     '系统解码',
     'IJK硬解',
@@ -129,10 +129,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: EdgeInsets.all(16),
         children: [
-          // 配置项（从 configuration.json 动态生成）
+          // 动态配置项
           ..._buildConfigWidgets(),
           Divider(),
-          // ========== 解码方式选择 ==========
+          // ========== 解码方式选择（保留UI） ==========
           Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ListTile(
             title: Text('解码方式'),
@@ -200,6 +200,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (value) {
                   settings.setDecoderIndex(value!);
                   Navigator.pop(context);
+                  // 提示用户重启应用生效（因为 video_player 不支持动态切换）
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('解码方式已保存，重启应用生效')),
+                  );
                 },
               );
             },
