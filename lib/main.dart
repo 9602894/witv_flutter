@@ -9,8 +9,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 异步初始化 media_kit（不阻塞）
-  // 使用未等待的 Future
+  // 初始化 media_kit（同步，不阻塞）
   MediaKit.ensureInitialized();
 
   // 捕获错误
