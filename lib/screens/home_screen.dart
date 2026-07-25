@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:io' show exit;
 import '../services/settings_service.dart';
 import '../services/config_service.dart';
 import '../services/playlist_parser.dart';
@@ -29,62 +30,78 @@ class _HomeScreenState extends State<HomeScreen> {
   bool showOverlay = true;
   bool isScheduleMode = false;
   bool isEditMode = false;
+
   double subWeight = 0.2;
   double groupWeight = 0.2;
   double channelWeight = 0.6;
+
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
-  String errorMessage = '';
+
+  // 右侧菜单相关
+  bool _menuVisible = false;
+  List<String> _menuItems = [];
 
   @override
   void initState() {
     super.initState();
-    LogService.write('HomeScreen 初始化');
+    LogService.write('主页初始化');
+    _loadMenuItems();
     _init();
   }
 
-  Future<void> _init() async {
+  Future<void> _loadMenuItems() async {
     try {
-      LogService.write('开始初始化');
-      // 强制显示界面
-      setState(() {
-        isLoading = false;
-      });
-
-      // 后台加载数据
-      await _loadData();
-
-      LogService.write('初始化完成');
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-      setState(() {
-        errorMessage = e.toString();
-        isLoading = false;
-      });
+      final config = await ConfigService.getConfig();
+      final inner = config['Configuration'] as Map<String, dynamic>?;
+      final menuStr = inner?['SHORTCUTS_MENU_SELECT'] as String?;
+      if (menuStr != null && menuStr.isNotEmpty) {
+        _menuItems = menuStr.split(',').map((e) => e.trim()).toList();
+      } else {
+        // 默认菜单
+        _menuItems = ['列表订阅', 'EPG订阅', '无线投屏', '频道搜索', 'APP信息'];
+      }
+      setState(() {});
+    } catch (e) {
+      LogService.write('加载菜单失败: $e');
+      _menuItems = ['列表订阅', 'EPG订阅', '无线投屏', '频道搜索', 'APP信息'];
     }
   }
 
-  Future<void> _loadData() async {
-    // 添加一个简单的延迟，让界面先显示
-    await Future.delayed(Duration(milliseconds: 100));
-    LogService.write('开始加载数据');
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    if (settings.needsRefresh) {
+      settings.clearRefreshFlag();
+      _reloadData();
+    }
+  }
 
-    // 从 SettingsService 获取订阅源
+  Future<void> _init() async {
+    await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.subscriptions.isEmpty) {
-      LogService.write('订阅源为空，尝试添加默认源');
       await _addDefaultSubscription();
     }
-
-    // 加载选中的订阅源
     await _loadInitialSource();
-    LogService.write('数据加载完成');
+    _checkSubscriptions();
+    setState(() {
+      isLoading = false;
+    });
+    LogService.write('初始化完成');
+    _loadEpgInBackground();
+  }
+
+  Future<void> _loadSavedSubscriptions() async {
+    await Future.delayed(Duration.zero);
   }
 
   Future<void> _addDefaultSubscription() async {
     try {
+      LogService.write('尝试从配置添加默认订阅源');
       final config = await ConfigService.getConfig();
       final inner = config['Configuration'] as Map<String, dynamic>?;
       final liveUrl = inner?['LIVE_URLS'] as String?;
@@ -99,12 +116,97 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
         final settings = Provider.of<SettingsService>(context, listen: false);
-        settings.addSubscription(Subscription(name: name, url: url, selected: true));
-        LogService.write('添加默认订阅源成功: $name -> $url');
+        final sub = Subscription(name: name, url: url, selected: true);
+        settings.addSubscription(sub);
+        LogService.write('自动添加默认订阅源: $name -> $url');
       }
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
     }
+  }
+
+  Future<void> _loadEpgInBackground() async {
+    try {
+      LogService.write('后台加载 EPG 开始');
+      final config = await ConfigService.getConfig();
+      final inner = config['Configuration'] as Map<String, dynamic>?;
+      final epgUrlRaw = inner?['EPG_URLS'] as String?;
+      if (epgUrlRaw != null && epgUrlRaw.isNotEmpty) {
+        String epgUrl = epgUrlRaw;
+        if (epgUrlRaw.contains(r'$')) {
+          epgUrl = epgUrlRaw.split(r'$')[0].trim();
+        }
+        LogService.write('EPG URL (纯): $epgUrl');
+        final map = await EpgParser.loadAllEpg(epgUrl).timeout(
+          Duration(seconds: 30),
+          onTimeout: () {
+            LogService.write('EPG 加载超时，跳过');
+            return {};
+          },
+        );
+        setState(() {
+          epgMap = map;
+        });
+        LogService.write('EPG加载成功，频道数: ${map.length}');
+      } else {
+        LogService.write('EPG URL为空，跳过');
+      }
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  }
+
+  Future<void> _reloadData() async {
+    LogService.write('刷新数据');
+    setState(() {
+      isLoading = true;
+    });
+    await _loadInitialSource();
+    _checkSubscriptions();
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  void _checkSubscriptions() {
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    final hasSelected = settings.subscriptions.any((s) => s.selected);
+    setState(() {
+      _hasSubscriptions = hasSelected || channels.isNotEmpty;
+    });
+    if (!_hasSubscriptions) {
+      _showNoSourceDialog();
+    }
+  }
+
+  void _showNoSourceDialog() {
+    LogService.write('无订阅源，显示提示对话框');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          title: Text('提示'),
+          content: Text('当前没有可用的订阅源，请先添加订阅源。'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SettingsScreen()),
+                );
+              },
+              child: Text('去设置'),
+            ),
+            TextButton(
+              onPressed: () => exit(0),
+              child: Text('退出'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   Future<void> _loadInitialSource() async {
@@ -126,174 +228,253 @@ class _HomeScreenState extends State<HomeScreen> {
           channels = groupMap[currentGroup]!;
           if (channels.isNotEmpty) currentChannel = channels.first;
         }
-        _hasSubscriptions = true;
       });
       LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      setState(() {
-        errorMessage = '加载订阅源失败: $e';
-      });
     }
+  }
+
+  Future<void> _loadGroup(String group) async {
+    try {
+      LogService.write('切换到分组: $group');
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      final selected = settings.subscriptions.where((s) => s.selected).toList();
+      if (selected.isNotEmpty) {
+        final url = selected.first.url;
+        final groupMap = await PlaylistParser.parseFromUrl(url);
+        setState(() {
+          groups = groupMap.keys.toList();
+          if (groups.isNotEmpty) {
+            currentGroup = group;
+            channels = groupMap[group] ?? [];
+            if (channels.isNotEmpty && currentChannel == null) {
+              currentChannel = channels.first;
+            }
+          }
+        });
+        LogService.write('分组加载成功，频道数: ${channels.length}');
+      }
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  }
+
+  // 返回键处理：切换菜单显示/隐藏
+  bool _onKeyDown(KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.back) {
+      setState(() {
+        _menuVisible = !_menuVisible;
+      });
+      return true;
+    }
+    return false;
   }
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
       return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 20),
-              Text('加载中...', style: TextStyle(color: Colors.white)),
-            ],
-          ),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
-    if (errorMessage.isNotEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error, color: Colors.red, size: 64),
-              SizedBox(height: 20),
-              Text('错误: $errorMessage', style: TextStyle(color: Colors.white)),
-              SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    errorMessage = '';
-                    isLoading = true;
-                  });
-                  _init();
-                },
-                child: Text('重试'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // 正常界面（如果频道为空，显示提示）
-    if (channels.isEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('没有频道数据', style: TextStyle(color: Colors.white, fontSize: 20)),
-              SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => SettingsScreen()),
-                  );
-                },
-                child: Text('去设置添加订阅源'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // 正常主界面（简化版，只显示频道列表和播放器）
-    return Scaffold(
-      body: Stack(
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.back) {
+          setState(() {
+            _menuVisible = !_menuVisible;
+          });
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Stack(
         children: [
-          if (currentChannel != null)
-            PlayerWidget(
-              url: currentChannel!.url,
-              onError: () => LogService.write('播放器错误'),
-              onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
-            ),
-          if (showOverlay && !isScheduleMode)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black54,
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: (subWeight * 10).toInt(),
-                      child: GroupList(
-                        groups: groups,
-                        selectedGroup: currentGroup,
-                        onSelect: (group) {
-                          setState(() {
-                            currentGroup = group;
-                            // 简单切换：从组中取频道
-                            final settings = Provider.of<SettingsService>(context, listen: false);
-                            final selected = settings.subscriptions.where((s) => s.selected).toList();
-                            if (selected.isNotEmpty) {
-                              PlaylistParser.parseFromUrl(selected.first.url).then((groupMap) {
-                                setState(() {
-                                  channels = groupMap[group] ?? [];
-                                  if (channels.isNotEmpty) currentChannel = channels.first;
-                                });
-                              });
-                            }
-                          });
+          // 主界面
+          Scaffold(
+            body: Stack(
+              children: [
+                // 播放器（ID: player_area）
+                if (currentChannel != null)
+                  Positioned.fill(
+                    child: Container(
+                      key: const Key('player_area'),
+                      child: PlayerWidget(
+                        url: currentChannel!.url,
+                        onError: () {
+                          LogService.write('播放器错误回调');
                         },
+                        onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
                       ),
                     ),
-                    VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
-                    Expanded(
-                      flex: (channelWeight * 10).toInt(),
-                      child: ChannelList(
+                  ),
+                // 叠加层（分组列表、频道列表）
+                if (showOverlay && !isScheduleMode)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black54,
+                      child: Row(
+                        children: [
+                          // 分组列表（ID: group_list）
+                          Expanded(
+                            flex: (subWeight * 10).toInt(),
+                            child: Container(
+                              key: const Key('group_list'),
+                              child: GroupList(
+                                groups: groups,
+                                selectedGroup: currentGroup,
+                                onSelect: (group) {
+                                  setState(() {
+                                    currentGroup = group;
+                                    _loadGroup(group);
+                                  });
+                                },
+                              ),
+                            ),
+                          ),
+                          VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
+                          // 频道列表（ID: channel_list）
+                          Expanded(
+                            flex: (channelWeight * 10).toInt(),
+                            child: Container(
+                              key: const Key('channel_list'),
+                              child: ChannelList(
+                                channels: channels,
+                                selectedChannel: currentChannel,
+                                onSelect: (ch) {
+                                  LogService.write('选择频道: ${ch.name}');
+                                  setState(() => currentChannel = ch);
+                                },
+                                epgMap: epgMap,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // 节目单模式
+                if (isScheduleMode)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black87,
+                      child: ScheduleView(
                         channels: channels,
                         selectedChannel: currentChannel,
-                        onSelect: (ch) {
-                          LogService.write('选择频道: ${ch.name}');
-                          setState(() => currentChannel = ch);
-                        },
                         epgMap: epgMap,
+                        onSelectChannel: (ch) => setState(() => currentChannel = ch),
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-          Positioned(
-            top: 0,
-            right: 0,
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(Icons.schedule, color: Colors.white),
-                  onPressed: () => setState(() => isScheduleMode = !isScheduleMode),
-                ),
-                IconButton(
-                  icon: Icon(Icons.edit, color: Colors.white),
-                  onPressed: () => setState(() => isEditMode = !isEditMode),
-                ),
-                IconButton(
-                  icon: Icon(Icons.settings, color: Colors.white),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => SettingsScreen()),
+                  ),
+                // 底部点击区域（用于弹出信息）
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: 100,
+                  child: GestureDetector(
+                    onTap: () {
+                      if (currentChannel != null) {
+                        final programs = EpgParser.getProgramsForChannel(currentChannel!.name);
+                        showInfoPopup(context, currentChannel!, programs, currentSpeed);
+                      }
+                    },
+                    child: Container(color: Colors.transparent),
                   ),
                 ),
+                // 顶部工具栏
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.schedule, color: Colors.white),
+                        onPressed: () => setState(() => isScheduleMode = !isScheduleMode),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.edit, color: Colors.white),
+                        onPressed: () => setState(() => isEditMode = !isEditMode),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.settings, color: Colors.white),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => SettingsScreen()),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 编辑工具栏
+                if (isEditMode)
+                  EditToolbar(
+                    isEditMode: isEditMode,
+                    onExit: () => setState(() => isEditMode = false),
+                    subWeight: subWeight,
+                    onSubWeightChange: (v) => setState(() {
+                      subWeight = v;
+                      groupWeight = (1 - subWeight) * 0.5;
+                      channelWeight = 1 - subWeight - groupWeight;
+                    }),
+                    groupWeight: groupWeight,
+                    onGroupWeightChange: (v) => setState(() {
+                      groupWeight = v;
+                      subWeight = (1 - groupWeight) * 0.5;
+                      channelWeight = 1 - subWeight - groupWeight;
+                    }),
+                  ),
+                // 网速显示
+                if (currentSpeed > 0)
+                  Positioned(
+                    top: 50,
+                    left: 10,
+                    child: Container(
+                      color: Colors.black54,
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text(
+                        '${currentSpeed.toStringAsFixed(1)} KB/s',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
-          // 显示网速
-          if (currentSpeed > 0)
+          // 右侧菜单（ID: menu_panel）
+          if (_menuVisible)
             Positioned(
-              top: 50,
-              left: 10,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: MediaQuery.of(context).size.width * 0.1,
               child: Container(
-                color: Colors.black54,
-                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                child: Text(
-                  '${currentSpeed.toStringAsFixed(1)} KB/s',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
+                key: const Key('menu_panel'),
+                color: Colors.black87,
+                child: ListView.builder(
+                  itemCount: _menuItems.length,
+                  itemBuilder: (context, index) {
+                    final title = _menuItems[index];
+                    return ListTile(
+                      title: Text(
+                        title,
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
+                      onTap: () {
+                        LogService.write('点击菜单: $title');
+                        // 根据标题执行对应操作，暂时只显示 Toast
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('点击了: $title')),
+                        );
+                        setState(() {
+                          _menuVisible = false;
+                        });
+                      },
+                    );
+                  },
                 ),
               ),
             ),
