@@ -58,12 +58,9 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 删除 screen_brightness_android 插件，避免编译错误
-      - name: Remove screen_brightness_android plugin
-        run: |
-          echo "删除 screen_brightness_android 插件..."
-          rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
-          echo "✅ 已删除"
+      # 彻底删除有问题的插件
+      - name: Remove problematic plugins
+        run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
 
       - name: Build Android APK (release)
         run: flutter build apk --release
