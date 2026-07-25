@@ -9,13 +9,13 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 同步初始化 media_kit，如果失败则记录日志，但不影响 UI 启动
+  // 同步初始化 media_kit，确保在播放器使用前完成
   try {
     MediaKit.ensureInitialized();
     await LogService.write('MediaKit 初始化成功');
   } catch (e, stack) {
     await LogService.writeCrashLog(e, stack);
-    // 继续启动，播放器会尝试重试
+    // 即使失败也继续启动，播放器会尝试重试
   }
 
   // 捕获错误
