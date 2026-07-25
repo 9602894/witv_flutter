@@ -124,9 +124,15 @@ class _HomeScreenState extends State<HomeScreen> {
       LogService.write('开始加载配置和EPG');
       final config = await ConfigService.getConfig();
       final inner = config['Configuration'] as Map<String, dynamic>?;
-      final epgUrl = inner?['EPG_URLS'] as String?;
-      if (epgUrl != null && epgUrl.isNotEmpty) {
-        LogService.write('EPG URL: $epgUrl');
+      
+      // 处理 EPG URL：剥离 $ 及后面的名称
+      final epgUrlRaw = inner?['EPG_URLS'] as String?;
+      if (epgUrlRaw != null && epgUrlRaw.isNotEmpty) {
+        String epgUrl = epgUrlRaw;
+        if (epgUrlRaw.contains(r'$')) {
+          epgUrl = epgUrlRaw.split(r'$')[0].trim();
+        }
+        LogService.write('EPG URL (纯): $epgUrl');
         final map = await EpgParser.loadAllEpg(epgUrl);
         setState(() {
           epgMap = map;
