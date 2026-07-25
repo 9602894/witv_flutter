@@ -58,27 +58,7 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 🔧 彻底删除 screen_brightness_android 插件中的 compilerOptions 块
-      - name: Patch screen_brightness_android build.gradle.kts
-        run: |
-          PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/screen_brightness_android*/android/build.gradle.kts" | grep -v "/example/" | head -n 1)
-          if [ -z "$PLUGIN_FILE" ]; then
-            echo "❌ 未找到 screen_brightness_android 主构建文件"
-            exit 1
-          fi
-          echo "📄 找到主文件: $PLUGIN_FILE"
-          cp "$PLUGIN_FILE" "$PLUGIN_FILE.bak"
-          # 使用 Perl 删除 compilerOptions 块（包括大括号内容）
-          perl -0777 -i -pe 's/\s*compilerOptions\s*\{[^}]*\}//g' "$PLUGIN_FILE"
-          echo "✅ 已删除 compilerOptions 块"
-          # 验证删除成功
-          if grep -q "compilerOptions" "$PLUGIN_FILE"; then
-            echo "❌ compilerOptions 仍存在"
-            cat "$PLUGIN_FILE" | grep -n "compilerOptions"
-            exit 1
-          else
-            echo "✅ 验证通过，已清除 compilerOptions"
-          fi
+      # 注意：不再需要修补 screen_brightness_android，因为升级 Gradle 后已解决
 
       - name: Build Android APK (release)
         run: flutter build apk --release
