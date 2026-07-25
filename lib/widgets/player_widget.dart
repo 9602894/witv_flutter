@@ -39,29 +39,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      final settings = Provider.of<SettingsService>(context, listen: false);
-      final decoder = settings.decoderIndex;
-      _currentDecoder = decoder;
-
-      // 配置播放器参数（增大缓冲，减少卡顿）
-      final config = PlayerConfiguration(
-        hardwareDecoding: decoder == 1, // 硬解
-        bufferDuration: Duration(milliseconds: 5000),
-        bufferSize: 8192,
-      );
-      // 软解：hardwareDecoding = false，自动则 null（默认）
-      if (decoder == 2) {
-        // 软解：强制 hardwareDecoding = false
-        // 但 PlayerConfiguration 的 hardwareDecoding 默认 null，我们显式设为 false
-        // 但构造时已设置，所以这里无需额外操作
-      }
-
-      player = Player(configuration: config);
+      // 使用默认配置（自动选择硬件解码）
+      player = Player();
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功，解码模式: $decoder');
+      LogService.write('Player 初始化成功');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -119,26 +103,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final settings = Provider.of<SettingsService>(context, listen: false);
-    if (settings.decoderIndex != _currentDecoder) {
-      LogService.write('解码器变更，重启播放器');
-      _currentDecoder = settings.decoderIndex;
-      _recreatePlayer();
-      return;
-    }
     if (oldWidget.url != widget.url && _isInitialized) {
       _currentUrl = widget.url;
       LogService.write('切换频道: ${widget.url}');
       player.open(Media(widget.url));
     }
-  }
-
-  void _recreatePlayer() {
-    if (_isInitialized) {
-      player.dispose();
-    }
-    _isInitialized = false;
-    _initPlayer();
   }
 
   @override
