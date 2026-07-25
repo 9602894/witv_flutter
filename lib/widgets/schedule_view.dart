@@ -89,6 +89,8 @@ class _ScheduleViewState extends State<ScheduleView> {
             selectedChannel: widget.selectedChannel,
             onSelect: widget.onSelectChannel,
             epgMap: widget.epgMap,
+            showChannelNumber: false,
+            showLogo: true,
           ),
         ),
         _buildDragBar(),
