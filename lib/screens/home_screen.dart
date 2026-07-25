@@ -8,7 +8,7 @@ import '../services/epg_parser.dart';
 import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
-import '../models/subscription.dart'; // 添加这行
+import '../models/subscription.dart'; // 添加这个导入
 import '../widgets/player_widget.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
@@ -58,17 +58,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _init() async {
-    // 等待 SettingsService 加载完成
-    await Future.delayed(Duration.zero);
+    // 第一步：尝试加载已保存的订阅源
+    await _loadInitialSource();
 
-    // 如果没有订阅源，尝试从配置添加默认源
+    // 第二步：如果没有订阅源，从配置添加默认源
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.subscriptions.isEmpty) {
       await _addDefaultSubscription();
+      // 重新加载订阅源
+      await _loadInitialSource();
     }
 
-    // 加载选中的订阅源
-    await _loadInitialSource();
     _checkSubscriptions();
 
     setState(() {
