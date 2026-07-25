@@ -9,9 +9,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 播放器核心
   media_kit: ^1.1.10
-  media_kit_video: 1.2.4        # 精确锁定，防止升级到不兼容版本
+  media_kit_video: 1.2.4
   media_kit_native_event_loop: ^1.0.8
 
   dio: ^5.4.0
@@ -34,7 +33,6 @@ flutter:
     - assets/configuration.json
     - assets/epg_data.json
 
-# 图标生成配置
 flutter_launcher_icons:
   android: true
   ios: false
@@ -43,6 +41,5 @@ flutter_launcher_icons:
   adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "ico/ic_launcher.png"
 
-# 强制覆盖，确保不会被其他间接依赖升级
 dependency_overrides:
   media_kit_video: 1.2.4
