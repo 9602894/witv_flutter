@@ -8,6 +8,7 @@ import '../services/epg_parser.dart';
 import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
+import '../models/subscription.dart';   // 添加这一行
 import '../widgets/player_widget.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
