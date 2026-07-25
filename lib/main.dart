@@ -14,8 +14,8 @@ void main() async {
     LogService.writeCrashLog(details.exception, details.stack);
   };
 
-  // 捕获 Dart 同步/异步错误
-  PlatformDispatcher.instance.onError = (error, stack) {
+  // 捕获 Dart 同步/异步错误（使用 WidgetsBinding 的 platformDispatcher）
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
     LogService.writeCrashLog(error, stack);
     return true;
   };
