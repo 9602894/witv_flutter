@@ -24,9 +24,6 @@ jobs:
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
-      - name: Clear pub cache
-        run: flutter pub cache repair
-
       - name: Install dependencies
         run: flutter pub get
 
@@ -55,14 +52,33 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
 
-      - name: Clear pub cache
-        run: flutter pub cache repair
-
       - name: Install dependencies
         run: flutter pub get
 
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
+
+      # 下载 libmpv.so 并放入 jniLibs
+      - name: Download libmpv.so
+        run: |
+          # 创建 jniLibs 目录
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
+          
+          # 下载 arm64-v8a 版本
+          curl -L -o android/app/src/main/jniLibs/arm64-v8a/libmpv.so \
+            https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.0.1/arm64-v8a/libmpv.so
+          
+          # 下载 armeabi-v7a 版本
+          curl -L -o android/app/src/main/jniLibs/armeabi-v7a/libmpv.so \
+            https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.0.1/armeabi-v7a/libmpv.so
+          
+          # 可选：也下载 x86_64 用于模拟器
+          mkdir -p android/app/src/main/jniLibs/x86_64
+          curl -L -o android/app/src/main/jniLibs/x86_64/libmpv.so \
+            https://github.com/media-kit/libmpv-android-video-build/releases/download/v1.0.1/x86_64/libmpv.so
+          
+          echo "✅ libmpv.so 下载完成"
 
       - name: Remove problematic plugins
         run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
