@@ -9,16 +9,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 异步初始化 media_kit（不阻塞 UI 启动）
-  // 使用 Future.microtask 延迟执行
-  Future.microtask(() {
-    try {
-      MediaKit.ensureInitialized();
-      LogService.write('MediaKit 初始化成功');
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-    }
-  });
+  // 异步初始化 media_kit（不阻塞）
+  // 使用未等待的 Future
+  MediaKit.ensureInitialized();
 
   // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
