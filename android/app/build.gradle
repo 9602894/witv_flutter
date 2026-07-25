@@ -27,7 +27,7 @@ apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace 'com.whyun.witv'
-    compileSdkVersion 33   // 改为稳定版本
+    compileSdkVersion 34   // 升级到 34 满足 core-ktx 要求
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -45,7 +45,7 @@ android {
     defaultConfig {
         applicationId "com.whyun.witv"
         minSdkVersion 21
-        targetSdkVersion 33   // 与 compileSdkVersion 一致
+        targetSdkVersion 34   // 与 compileSdkVersion 一致
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
