@@ -57,13 +57,48 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _init() async {
-    await _loadConfigAndEpg();
+    // 先加载订阅源（快速显示界面）
     await _loadInitialSource();
     _checkSubscriptions();
     setState(() {
       isLoading = false;
     });
-    LogService.write('主页初始化完成');
+    LogService.write('主页初始化完成，显示界面');
+
+    // 后台加载 EPG（不阻塞 UI）
+    _loadEpgInBackground();
+  }
+
+  Future<void> _loadEpgInBackground() async {
+    try {
+      LogService.write('后台加载 EPG 开始');
+      final config = await ConfigService.getConfig();
+      final inner = config['Configuration'] as Map<String, dynamic>?;
+      final epgUrlRaw = inner?['EPG_URLS'] as String?;
+      if (epgUrlRaw != null && epgUrlRaw.isNotEmpty) {
+        String epgUrl = epgUrlRaw;
+        if (epgUrlRaw.contains(r'$')) {
+          epgUrl = epgUrlRaw.split(r'$')[0].trim();
+        }
+        LogService.write('EPG URL (纯): $epgUrl');
+        // 设置超时 10 秒，防止卡死
+        final map = await EpgParser.loadAllEpg(epgUrl).timeout(
+          Duration(seconds: 30),
+          onTimeout: () {
+            LogService.write('EPG 加载超时，跳过');
+            return {};
+          },
+        );
+        setState(() {
+          epgMap = map;
+        });
+        LogService.write('EPG加载成功，频道数: ${map.length}');
+      } else {
+        LogService.write('EPG URL为空，跳过');
+      }
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
   }
 
   Future<void> _reloadData() async {
@@ -117,33 +152,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     });
-  }
-
-  Future<void> _loadConfigAndEpg() async {
-    try {
-      LogService.write('开始加载配置和EPG');
-      final config = await ConfigService.getConfig();
-      final inner = config['Configuration'] as Map<String, dynamic>?;
-      
-      // ★ 修正：剥离 EPG URL 中的 $ 及后面的名称
-      final epgUrlRaw = inner?['EPG_URLS'] as String?;
-      if (epgUrlRaw != null && epgUrlRaw.isNotEmpty) {
-        String epgUrl = epgUrlRaw;
-        if (epgUrlRaw.contains(r'$')) {
-          epgUrl = epgUrlRaw.split(r'$')[0].trim();
-        }
-        LogService.write('EPG URL (纯): $epgUrl');
-        final map = await EpgParser.loadAllEpg(epgUrl);
-        setState(() {
-          epgMap = map;
-        });
-        LogService.write('EPG加载成功，频道数: ${map.length}');
-      } else {
-        LogService.write('EPG URL为空，跳过');
-      }
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-    }
   }
 
   Future<void> _loadInitialSource() async {
