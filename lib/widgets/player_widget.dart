@@ -40,16 +40,31 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _initPlayer() {
     try {
       final settings = Provider.of<SettingsService>(context, listen: false);
-      final decoder = settings.decoderIndex;
-      _currentDecoder = decoder;
+      _currentDecoder = settings.decoderIndex;
 
-      // 使用默认配置（不传递任何参数，避免兼容性问题）
-      player = Player();
+      // 解码映射：0=系统（auto），1=硬解（true），2=软解（false）
+      // 其他值暂映射为硬解/软解组合
+      bool? hardwareDecoding;
+      if (_currentDecoder == 1 || _currentDecoder == 3 || _currentDecoder == 5) {
+        hardwareDecoding = true; // 硬解
+      } else if (_currentDecoder == 2 || _currentDecoder == 4 || _currentDecoder == 6) {
+        hardwareDecoding = false; // 软解
+      } else {
+        hardwareDecoding = null; // 系统自动
+      }
+
+      final config = PlayerConfiguration(
+        hardwareDecoding: hardwareDecoding,
+        bufferDuration: Duration(milliseconds: 5000),
+        bufferSize: 8192,
+      );
+
+      player = Player(configuration: config);
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功（解码由 media_kit 自动选择）');
+      LogService.write('Player 初始化成功，解码模式: $_currentDecoder');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -107,8 +122,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.decoderIndex != _currentDecoder) {
       _currentDecoder = settings.decoderIndex;
-      LogService.write('解码方式已切换为 $_currentDecoder，重启播放器');
-      // 由于 media_kit 不支持动态切换，重启播放器
+      LogService.write('解码方式切换为 $_currentDecoder，重启播放器');
       _recreatePlayer();
       return;
     }
