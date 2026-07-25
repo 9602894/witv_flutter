@@ -35,8 +35,7 @@ dependencies:
   # SVG 图标（可选）
   flutter_svg: ^2.0.9
 
-  # 屏幕亮度调节（如果不需要，可删除此行）
-  screen_brightness: 2.0.0   # 锁定主包版本
+  # screen_brightness 已移除
 
 dev_dependencies:
   flutter_test:
@@ -48,7 +47,3 @@ flutter:
   assets:
     - assets/configuration.json
     - assets/epg_data.json
-
-# 强制使用修复后的 android 实现版本
-dependency_overrides:
-  screen_brightness_android: 2.1.6   # 修复了 jvmTarget 语法错误
