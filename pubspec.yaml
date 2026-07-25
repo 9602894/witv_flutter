@@ -9,13 +9,28 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # 视频播放器（官方，稳定，无额外依赖）
   video_player: ^2.8.0
+
+  # 网络请求
   dio: ^5.4.0
+
+  # XML 解析
   xml: ^6.5.0
+
+  # JSON 序列化
   json_annotation: ^4.8.1
+
+  # 本地存储
   shared_preferences: ^2.2.2
+
+  # 状态管理
   provider: ^6.1.1
+
+  # 文件路径
   path_provider: ^2.1.2
+
+  # SVG 图标（可选）
   flutter_svg: ^2.0.9
 
 dev_dependencies:
