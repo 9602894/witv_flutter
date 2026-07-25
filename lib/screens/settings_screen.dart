@@ -15,7 +15,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? config;
   bool isLoading = true;
 
-  // 解码方式列表（与 configuration.json #22 一致，保留 UI）
   final List<String> decoderNames = [
     '系统解码',
     'IJK硬解',
@@ -129,10 +128,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: EdgeInsets.all(16),
         children: [
-          // 动态配置项
+          // 配置项
           ..._buildConfigWidgets(),
           Divider(),
-          // ========== 解码方式选择（保留UI） ==========
+          // ========== 播放设置 ==========
           Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ListTile(
             title: Text('解码方式'),
@@ -141,6 +140,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icon(Icons.arrow_forward_ios),
               onPressed: () => _showDecoderDialog(context),
             ),
+          ),
+          SwitchListTile(
+            title: Text('断线自动重连'),
+            subtitle: Text('断开后1秒自动重试'),
+            value: settings.autoReconnect,
+            onChanged: (value) => settings.setAutoReconnect(value),
           ),
           Divider(),
           // ========== 订阅源管理 ==========
@@ -180,7 +185,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ========== 解码方式选择对话框 ==========
   void _showDecoderDialog(BuildContext context) {
     final settings = Provider.of<SettingsService>(context, listen: false);
     showDialog(
@@ -200,10 +204,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (value) {
                   settings.setDecoderIndex(value!);
                   Navigator.pop(context);
-                  // 提示用户重启应用生效（因为 video_player 不支持动态切换）
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('解码方式已保存，重启应用生效')),
-                  );
                 },
               );
             },
@@ -219,14 +219,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ========== 从 configuration.json 动态生成配置项 ==========
+  // 以下方法与之前相同
   List<Widget> _buildConfigWidgets() {
     final widgets = <Widget>[];
     config!.forEach((key, value) {
-      // 跳过 EPG_URLS（单独处理）
       if (key == 'EPG_URLS') return;
       if (value == null) return;
-      // 仅处理基本类型
       if (value is! bool && value is! num && value is! String) {
         widgets.add(ListTile(
           title: Text(key),
@@ -310,7 +308,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return widgets;
   }
 
-  // ========== EPG编辑对话框 ==========
   void _editEpgDialog(BuildContext context) {
     final current = config!['EPG_URLS'] ?? '';
     final ctrl = TextEditingController(text: current);
@@ -338,7 +335,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ========== 添加订阅对话框 ==========
   void _addSubscriptionDialog(BuildContext context) {
     final nameCtrl = TextEditingController();
     final urlCtrl = TextEditingController();
