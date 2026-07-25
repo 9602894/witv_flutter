@@ -8,11 +8,10 @@ import '../models/epg_program.dart';
 import 'log_service.dart';
 
 class EpgParser {
-  static Map<String, String>? _aliasMap; // key: channel name, value: epgid
+  static Map<String, String>? _aliasMap;
   static Map<String, List<EpgProgram>>? _allPrograms;
-  static Map<String, String>? _channelIdMap; // key: display-name, value: channel-id
+  static Map<String, String>? _channelIdMap;
 
-  /// 加载别名映射（epg_data.json）
   static Future<Map<String, String>> loadAliasMap() async {
     if (_aliasMap != null) return _aliasMap!;
     try {
@@ -35,13 +34,11 @@ class EpgParser {
     }
   }
 
-  /// 加载所有 EPG 数据（支持缓存）
   static Future<Map<String, List<EpgProgram>>> loadAllEpg(String url) async {
     if (_allPrograms != null) return _allPrograms!;
     await LogService.write('开始加载EPG: $url');
 
     try {
-      // 确保别名映射已加载
       await loadAliasMap();
 
       final dir = await getApplicationDocumentsDirectory();
@@ -49,10 +46,11 @@ class EpgParser {
       final hashFile = File('${dir.path}/epg_hash.txt');
 
       bool needDownload = true;
-      // 尝试使用哈希缓存
+      // 使用 Dio 并设置超时
+      final dio = Dio(BaseOptions(connectTimeout: Duration(seconds: 10), receiveTimeout: Duration(seconds: 15)));
       try {
         final hashUrl = '$url.hash';
-        final hashResponse = await Dio().get(hashUrl);
+        final hashResponse = await dio.get(hashUrl);
         final remoteHash = hashResponse.data as String;
         if (await hashFile.exists()) {
           final localHash = await hashFile.readAsString();
@@ -62,15 +60,15 @@ class EpgParser {
           }
         }
         if (needDownload) {
-          final response = await Dio().get(url);
+          final response = await dio.get(url);
           await cacheFile.writeAsString(response.data as String);
           await hashFile.writeAsString(remoteHash);
           await LogService.write('EPG下载完成，已缓存');
         }
       } catch (e) {
-        // 无哈希或哈希失败，直接下载
         await LogService.write('获取哈希失败，直接下载: $e');
-        final response = await Dio().get(url);
+        // 直接下载
+        final response = await dio.get(url);
         await cacheFile.writeAsString(response.data as String);
         await LogService.write('EPG下载完成（无哈希）');
       }
@@ -81,7 +79,6 @@ class EpgParser {
       final allPrograms = <String, List<EpgProgram>>{};
       final displayNameToChannelId = <String, String>{};
 
-      // 第一步：构建 display-name -> channel-id 映射
       for (var channel in document.findAllElements('channel')) {
         final id = channel.getAttribute('id')!;
         final displayNames = channel.findAllElements('display-name').map((e) => e.text.trim()).toList();
@@ -92,11 +89,9 @@ class EpgParser {
       _channelIdMap = displayNameToChannelId;
       await LogService.write('EPG中频道数: ${displayNameToChannelId.length}');
 
-      // 第二步：解析 programme
       int programCount = 0;
       for (var prog in document.findAllElements('programme')) {
         final channelId = prog.getAttribute('channel')!;
-        // 去除时区偏移（如 +0800）
         String startStr = prog.getAttribute('start')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
         String stopStr = prog.getAttribute('stop')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
         try {
@@ -113,7 +108,6 @@ class EpgParser {
       }
       await LogService.write('EPG节目总条目数: $programCount');
 
-      // 第三步：利用别名映射将直播频道名映射到 channel id
       final mapped = <String, List<EpgProgram>>{};
       int successCount = 0, failCount = 0;
       for (var entry in _aliasMap!.entries) {
@@ -132,18 +126,15 @@ class EpgParser {
       return mapped;
     } catch (e, stack) {
       await LogService.writeCrashLog(e, stack);
-      // 返回空映射，避免应用崩溃
       _allPrograms = {};
       return _allPrograms!;
     }
   }
 
-  /// 获取某个频道的 EPG 节目列表
   static List<EpgProgram> getProgramsForChannel(String channelName) {
     return _allPrograms?[channelName] ?? [];
   }
 
-  /// 获取所有 EPG 数据（用于调试）
   static Map<String, List<EpgProgram>> getAllPrograms() {
     return _allPrograms ?? {};
   }
