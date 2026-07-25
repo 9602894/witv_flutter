@@ -85,9 +85,10 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
         body: Stack(
           children: [
-            // 播放器
+            // 播放器（使用 ValueKey 强制重建）
             if (currentChannel != null)
               PlayerWidget(
+                key: ValueKey(currentChannel!.url), // 关键：URL变化时重建
                 url: currentChannel!.url,
                 onError: () => LogService.write('播放器错误回调'),
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
@@ -308,7 +309,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSavedSubscriptions() async {
-    // 已由 SettingsService 加载
     await Future.delayed(Duration.zero);
   }
 
@@ -427,8 +427,6 @@ class _HomeScreenState extends State<HomeScreen> {
           channels = groupMap[currentGroup]!;
           if (channels.isNotEmpty) {
             currentChannel = channels.first;
-            // 强制刷新播放器
-            LogService.write('当前频道: ${currentChannel!.name}');
           }
         }
       });
