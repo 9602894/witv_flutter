@@ -5,6 +5,7 @@ import '../services/settings_service.dart';
 import '../services/config_service.dart';
 import '../services/playlist_parser.dart';
 import '../services/epg_parser.dart';
+import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
 import '../widgets/player_widget.dart';
@@ -41,13 +42,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    LogService.write('主页初始化');
     _init();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 每次依赖变化（例如从设置页返回）检查是否需要刷新
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.needsRefresh) {
       settings.clearRefreshFlag();
@@ -59,9 +60,14 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadConfigAndEpg();
     await _loadInitialSource();
     _checkSubscriptions();
+    setState(() {
+      isLoading = false;
+    });
+    LogService.write('主页初始化完成');
   }
 
   Future<void> _reloadData() async {
+    LogService.write('刷新数据');
     setState(() {
       isLoading = true;
     });
@@ -84,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showNoSourceDialog() {
+    LogService.write('无订阅源，显示提示对话框');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       showDialog(
         context: context,
@@ -114,48 +121,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadConfigAndEpg() async {
     try {
+      LogService.write('开始加载配置和EPG');
       final config = await ConfigService.getConfig();
       final inner = config['Configuration'] as Map<String, dynamic>?;
       final epgUrl = inner?['EPG_URLS'] as String?;
       if (epgUrl != null && epgUrl.isNotEmpty) {
+        LogService.write('EPG URL: $epgUrl');
         final map = await EpgParser.loadAllEpg(epgUrl);
         setState(() {
           epgMap = map;
         });
+        LogService.write('EPG加载成功，频道数: ${map.length}');
+      } else {
+        LogService.write('EPG URL为空，跳过');
       }
-    } catch (e) {
-      print('加载EPG失败: $e');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
     }
   }
 
   Future<void> _loadInitialSource() async {
     try {
+      LogService.write('开始加载订阅源');
       final settings = Provider.of<SettingsService>(context, listen: false);
       final selected = settings.subscriptions.where((s) => s.selected).toList();
-      if (selected.isNotEmpty) {
-        final url = selected.first.url;
-        final groupMap = await PlaylistParser.parseFromUrl(url);
-        setState(() {
-          groups = groupMap.keys.toList();
-          if (groups.isNotEmpty) {
-            currentGroup = groups.first;
-            channels = groupMap[currentGroup]!;
-            if (channels.isNotEmpty) currentChannel = channels.first;
-          }
-        });
-      } else {
-        setState(() {
-          channels = [];
-          groups = [];
-        });
+      if (selected.isEmpty) {
+        LogService.write('没有选中的订阅源');
+        return;
       }
-    } catch (e) {
-      print('加载源失败: $e');
+      final url = selected.first.url;
+      LogService.write('订阅源 URL: $url');
+      final groupMap = await PlaylistParser.parseFromUrl(url);
+      setState(() {
+        groups = groupMap.keys.toList();
+        if (groups.isNotEmpty) {
+          currentGroup = groups.first;
+          channels = groupMap[currentGroup]!;
+          if (channels.isNotEmpty) currentChannel = channels.first;
+        }
+      });
+      LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
     }
   }
 
   Future<void> _loadGroup(String group) async {
     try {
+      LogService.write('切换到分组: $group');
       final settings = Provider.of<SettingsService>(context, listen: false);
       final selected = settings.subscriptions.where((s) => s.selected).toList();
       if (selected.isNotEmpty) {
@@ -171,9 +184,10 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
         });
+        LogService.write('分组加载成功，频道数: ${channels.length}');
       }
-    } catch (e) {
-      print('加载分组失败: $e');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
     }
   }
 
@@ -191,7 +205,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (currentChannel != null)
             PlayerWidget(
               url: currentChannel!.url,
-              onError: () => print('播放错误'),
+              onError: () {
+                LogService.write('播放器错误回调');
+              },
               onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
             ),
           if (showOverlay && !isScheduleMode)
@@ -220,6 +236,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         channels: channels,
                         selectedChannel: currentChannel,
                         onSelect: (ch) {
+                          LogService.write('选择频道: ${ch.name}');
                           setState(() => currentChannel = ch);
                         },
                         epgMap: epgMap,
