@@ -9,7 +9,6 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 同步初始化 MediaKit
   try {
     MediaKit.ensureInitialized();
     await LogService.write('MediaKit 初始化成功');
@@ -17,7 +16,6 @@ void main() async {
     await LogService.writeCrashLog(e, stack);
   }
 
-  // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
