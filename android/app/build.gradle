@@ -27,7 +27,7 @@ apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace 'com.whyun.witv'
-    compileSdkVersion 36
+    compileSdkVersion 36   // 提升到 36
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -46,7 +46,7 @@ android {
     defaultConfig {
         applicationId "com.whyun.witv"
         minSdkVersion 21
-        targetSdkVersion 34
+        targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
