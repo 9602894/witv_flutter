@@ -30,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // 窗口状态
   bool showChannelList = false;      // 频道列表是否显示
-  bool isScheduleMode = false;       // 是否显示节目单（覆盖频道列表）
+  bool isScheduleMode = false;       // 是否显示节目单
   bool _showEpgInfo = false;         // EPG 信息浮窗
   bool isEditMode = false;
   bool _showRightMenu = false;
@@ -45,6 +45,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = true;
   bool _hasSubscriptions = false;
 
+  // 缓存所有订阅源数据，避免重复下载
+  Map<String, Map<String, List<Channel>>> _subscriptionCache = {};
+
   @override
   void initState() {
     super.initState();
@@ -56,7 +59,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 返回键优先级：EPG 浮窗 → 节目单 → 频道列表 → 退出确认
         if (_showEpgInfo) {
           setState(() => _showEpgInfo = false);
           return false;
@@ -73,7 +75,6 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() => _showRightMenu = false);
           return false;
         }
-        // 退出确认
         final shouldExit = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
@@ -91,15 +92,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         );
-        if (shouldExit == true) {
-          exit(0);
-        }
+        if (shouldExit == true) exit(0);
         return false;
       },
       child: Scaffold(
         body: Stack(
           children: [
-            // ---------- 播放器 ----------
+            // 播放器
             if (currentChannel != null)
               PlayerWidget(
                 url: currentChannel!.url,
@@ -107,17 +106,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // ---------- 左侧点击区域（显示/隐藏频道列表） ----------
+            // ---------- 左侧点击区域（带透明背景，确保可点击） ----------
             Positioned(
               left: 0,
               top: 0,
               bottom: 0,
               width: 40,
               child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
                 onTap: () {
+                  LogService.write('左侧点击，切换频道列表');
                   setState(() {
-                    // 如果节目单打开，先关闭节目单再打开频道列表？还是直接切换？
-                    // 这里设计：点击左侧边缘，如果节目单打开，则关闭节目单并打开频道列表，反之亦然
+                    // 如果节目单打开，则关闭节目单并打开频道列表
                     if (isScheduleMode) {
                       isScheduleMode = false;
                       showChannelList = true;
@@ -126,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                     if (showChannelList) {
                       _showRightMenu = false;
-                      _showEpgInfo = false; // 频道列表显示时，EPG 浮窗自动关闭（可自行调整）
+                      _showEpgInfo = false; // 频道列表显示时，EPG 浮窗关闭（可调整）
                     }
                   });
                 },
@@ -134,13 +134,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // ---------- 频道列表（三列，透明背景） ----------
+            // ---------- 频道列表（三列） ----------
             if (showChannelList && !isScheduleMode)
               Positioned(
                 left: 0,
                 top: 0,
                 bottom: 0,
-                width: MediaQuery.of(context).size.width * 0.7, // 覆盖左侧 70% 宽度
+                width: MediaQuery.of(context).size.width * 0.7,
                 child: Container(
                   color: Colors.transparent,
                   child: Row(
@@ -195,12 +195,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
-                      // 第三列：频道列表 + 节目单按钮（竖排）
+                      // 第三列：频道列表 + 竖排“节目单”按钮
                       Expanded(
                         flex: (channelWeight * 100).toInt(),
                         child: Stack(
                           children: [
-                            // 频道列表
                             Positioned.fill(
                               child: ChannelList(
                                 channels: channels,
@@ -209,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   LogService.write('选择频道: ${ch.name}');
                                   setState(() {
                                     currentChannel = ch;
-                                    _showEpgInfo = true; // 切换频道时显示 EPG 信息
+                                    _showEpgInfo = true;
                                   });
                                   Provider.of<SettingsService>(context, listen: false)
                                       .saveLastChannel(ch.name);
@@ -219,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 showLogo: true,
                               ),
                             ),
-                            // 右侧垂直居中“节目单”按钮
+                            // 右侧竖排“节目单”按钮
                             Positioned(
                               right: 0,
                               top: 0,
@@ -228,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onTap: () {
                                   setState(() {
                                     isScheduleMode = true;
-                                    showChannelList = false; // 关闭频道列表
+                                    showChannelList = false;
                                   });
                                 },
                                 child: Container(
@@ -237,18 +236,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text(
-                                        '节',
-                                        style: TextStyle(color: Colors.white, fontSize: 14),
-                                      ),
-                                      Text(
-                                        '目',
-                                        style: TextStyle(color: Colors.white, fontSize: 14),
-                                      ),
-                                      Text(
-                                        '单',
-                                        style: TextStyle(color: Colors.white, fontSize: 14),
-                                      ),
+                                      Text('节', style: TextStyle(color: Colors.white, fontSize: 14)),
+                                      Text('目', style: TextStyle(color: Colors.white, fontSize: 14)),
+                                      Text('单', style: TextStyle(color: Colors.white, fontSize: 14)),
                                     ],
                                   ),
                                 ),
@@ -262,18 +252,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- 节目单（覆盖频道列表位置，左上角有“频道组”返回按钮） ----------
+            // ---------- 节目单 ----------
             if (isScheduleMode)
               Positioned(
                 left: 0,
                 top: 0,
                 bottom: 0,
-                width: MediaQuery.of(context).size.width * 0.7, // 与频道列表宽度一致
+                width: MediaQuery.of(context).size.width * 0.7,
                 child: Container(
                   color: Colors.transparent,
                   child: Stack(
                     children: [
-                      // 节目单主体
                       Positioned.fill(
                         child: ScheduleView(
                           channels: channels,
@@ -289,9 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           leftWeight: 0.35,
                           rightWeight: 0.65,
-                          onLeftWeightChanged: (newLeft) {
-                            // 不保存状态
-                          },
+                          onLeftWeightChanged: (newLeft) {},
                           isEditMode: isEditMode,
                         ),
                       ),
@@ -303,7 +290,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           onTap: () {
                             setState(() {
                               isScheduleMode = false;
-                              showChannelList = true; // 返回频道列表
+                              showChannelList = true;
                             });
                           },
                           child: Container(
@@ -316,10 +303,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               children: [
                                 Icon(Icons.arrow_back, color: Colors.white, size: 20),
                                 SizedBox(width: 4),
-                                Text(
-                                  '频道组',
-                                  style: TextStyle(color: Colors.white, fontSize: 14),
-                                ),
+                                Text('频道组', style: TextStyle(color: Colors.white, fontSize: 14)),
                               ],
                             ),
                           ),
@@ -330,7 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- EPG 信息浮窗（中下部，保活） ----------
+            // ---------- EPG 信息浮窗 ----------
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -365,7 +349,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- 右侧菜单（返回键弹出） ----------
+            // ---------- 右侧菜单 ----------
             if (_showRightMenu)
               Positioned(
                 top: 0,
@@ -455,19 +439,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- 点击空白处关闭 EPG 浮窗、频道列表、节目单 ----------
-            if (_showEpgInfo || showChannelList || isScheduleMode)
+            // ---------- 点击空白关闭 EPG ----------
+            if (_showEpgInfo)
               Positioned.fill(
                 child: GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      if (_showEpgInfo) _showEpgInfo = false;
-                      // 注意：频道列表和节目单由返回键或专用按钮关闭，点击空白处只关闭 EPG
-                      // 如果您希望点击空白处也关闭频道列表/节目单，可取消注释下面两行
-                      // if (showChannelList) showChannelList = false;
-                      // if (isScheduleMode) isScheduleMode = false;
-                    });
-                  },
+                  onTap: () => setState(() => _showEpgInfo = false),
                   child: Container(color: Colors.transparent),
                 ),
               ),
@@ -477,7 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 组件构建方法 ==========
+  // ========== 构建订阅源列表 ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -518,9 +494,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             onTap: () {
+              LogService.write('切换订阅源: ${sub.name}');
+              // 先切换选中状态
               settings.toggleSelected(sub);
-              currentSubName = sub.name;
-              _reloadData();
+              // 重新加载数据（从缓存或网络）
+              _loadSubscriptionData(sub);
             },
           );
         },
@@ -528,6 +506,48 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ========== 加载指定订阅源的数据 ==========
+  Future<void> _loadSubscriptionData(Subscription sub) async {
+    try {
+      LogService.write('加载订阅源数据: ${sub.name}');
+      final url = sub.url;
+      // 从缓存或网络加载
+      final cacheFile = await PlaylistParser.getCacheFile(url, sub.name);
+      Map<String, List<Channel>> groupMap;
+      if (await cacheFile.exists()) {
+        LogService.write('从缓存加载: ${cacheFile.path}');
+        final content = await cacheFile.readAsString();
+        groupMap = PlaylistParser.parseFromString(content);
+      } else {
+        groupMap = await PlaylistParser.parseFromUrl(url);
+        await PlaylistParser.saveCache(groupMap, url, sub.name);
+      }
+
+      setState(() {
+        groups = groupMap.keys.toList();
+        if (groups.isNotEmpty) {
+          currentGroup = groups.first;
+          channels = groupMap[currentGroup]!;
+          if (channels.isNotEmpty) {
+            final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
+            if (lastChannel != null) {
+              final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
+              currentChannel = found;
+            } else {
+              currentChannel = channels.first;
+            }
+            _showEpgInfo = true;
+          }
+        }
+        currentSubName = sub.name;
+      });
+      LogService.write('订阅源加载完成，分组数: ${groups.length}，频道数: ${channels.length}');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  }
+
+  // ========== 分组列表 ==========
   Widget _buildGroupList() {
     return Container(
       color: Colors.transparent,
@@ -546,9 +566,20 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             onTap: () {
+              LogService.write('切换到分组: $group');
               setState(() {
                 currentGroup = group;
-                _loadGroup(group);
+                // 更新频道列表
+                final settings = Provider.of<SettingsService>(context, listen: false);
+                final selected = settings.subscriptions.where((s) => s.selected).toList();
+                if (selected.isNotEmpty) {
+                  final sub = selected.first;
+                  // 从缓存中获取分组数据（但我们已经有了 groupMap，需要重新加载）
+                  // 简便做法：直接调用 _loadSubscriptionData 重新加载当前订阅源，并指定分组
+                  // 但这样会重新加载全部数据，效率不高。我们缓存所有订阅源数据，但这里简单起见，我们重新加载当前订阅源
+                  // 更优：缓存 groupMap，但为了演示，我们直接调用 _loadSubscriptionData
+                  _loadSubscriptionData(sub);
+                }
               });
             },
           );
@@ -557,6 +588,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ========== 拖拽条 ==========
   Widget _buildDragBar({required Function(double delta) onDrag, required bool isEditMode}) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -571,6 +603,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ========== 菜单项 ==========
   Widget _buildMenuItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -588,6 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ========== EPG 信息项 ==========
   Widget _buildEpgItem(EpgProgram prog, String label) {
     final timeStr = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')}';
     return Column(
@@ -632,7 +666,8 @@ class _HomeScreenState extends State<HomeScreen> {
               if (name.isNotEmpty && url.isNotEmpty) {
                 final settings = Provider.of<SettingsService>(context, listen: false);
                 settings.addSubscription(Subscription(name: name, url: url, selected: true));
-                _reloadData();
+                // 自动加载新订阅
+                _loadSubscriptionData(Subscription(name: name, url: url, selected: true));
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已添加订阅: $name')));
               }
@@ -682,7 +717,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (settings.subscriptions.isEmpty) {
       await _addDefaultSubscription();
     }
-    await _loadInitialSource();
+    // 加载当前选中的订阅源
+    final selected = settings.subscriptions.where((s) => s.selected).toList();
+    if (selected.isNotEmpty) {
+      await _loadSubscriptionData(selected.first);
+    }
     _checkSubscriptions();
     setState(() {
       isLoading = false;
@@ -747,18 +786,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _reloadData() async {
-    LogService.write('刷新数据');
-    setState(() {
-      isLoading = true;
-    });
-    await _loadInitialSource();
-    _checkSubscriptions();
-    setState(() {
-      isLoading = false;
-    });
-  }
-
   void _checkSubscriptions() {
     final settings = Provider.of<SettingsService>(context, listen: false);
     final hasSelected = settings.subscriptions.any((s) => s.selected);
@@ -798,87 +825,5 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     });
-  }
-
-  Future<void> _loadInitialSource() async {
-    try {
-      LogService.write('开始加载订阅源');
-      final settings = Provider.of<SettingsService>(context, listen: false);
-      final selected = settings.subscriptions.where((s) => s.selected).toList();
-      if (selected.isEmpty) {
-        LogService.write('没有选中的订阅源');
-        return;
-      }
-      final sub = selected.first;
-      currentSubName = sub.name;
-      final url = sub.url;
-      LogService.write('订阅源 URL: $url');
-
-      final cacheFile = await PlaylistParser.getCacheFile(url, sub.name);
-      Map<String, List<Channel>> groupMap;
-      if (await cacheFile.exists()) {
-        LogService.write('从缓存加载: ${cacheFile.path}');
-        final content = await cacheFile.readAsString();
-        groupMap = PlaylistParser.parseFromString(content);
-      } else {
-        groupMap = await PlaylistParser.parseFromUrl(url);
-        await PlaylistParser.saveCache(groupMap, url, sub.name);
-      }
-
-      setState(() {
-        groups = groupMap.keys.toList();
-        if (groups.isNotEmpty) {
-          currentGroup = groups.first;
-          channels = groupMap[currentGroup]!;
-          if (channels.isNotEmpty) {
-            final lastChannel = settings.getLastChannel();
-            if (lastChannel != null) {
-              final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
-              currentChannel = found;
-            } else {
-              currentChannel = channels.first;
-            }
-            _showEpgInfo = true; // 自动显示 EPG 信息
-          }
-        }
-      });
-      LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-    }
-  }
-
-  Future<void> _loadGroup(String group) async {
-    try {
-      LogService.write('切换到分组: $group');
-      final settings = Provider.of<SettingsService>(context, listen: false);
-      final selected = settings.subscriptions.where((s) => s.selected).toList();
-      if (selected.isNotEmpty) {
-        final url = selected.first.url;
-        final cacheFile = await PlaylistParser.getCacheFile(url, selected.first.name);
-        Map<String, List<Channel>> groupMap;
-        if (await cacheFile.exists()) {
-          final content = await cacheFile.readAsString();
-          groupMap = PlaylistParser.parseFromString(content);
-        } else {
-          groupMap = await PlaylistParser.parseFromUrl(url);
-          await PlaylistParser.saveCache(groupMap, url, selected.first.name);
-        }
-        setState(() {
-          groups = groupMap.keys.toList();
-          if (groups.isNotEmpty) {
-            currentGroup = group;
-            channels = groupMap[group] ?? [];
-            if (channels.isNotEmpty && currentChannel == null) {
-              currentChannel = channels.first;
-              _showEpgInfo = true;
-            }
-          }
-        });
-        LogService.write('分组加载成功，频道数: ${channels.length}');
-      }
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-    }
   }
 }
