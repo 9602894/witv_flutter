@@ -9,8 +9,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 异步初始化 media_kit（不阻塞 UI 启动）
-  // 使用 Future.microtask 延迟执行
+  // 使用 Future.microtask 延迟执行，避免阻塞 runApp
   Future.microtask(() {
     try {
       MediaKit.ensureInitialized();
