@@ -9,17 +9,31 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 升级 media_kit 到最新稳定版（确保 native 库正确打包）
+  # 播放器核心
   media_kit: ^1.2.0
   media_kit_video: ^1.2.0
   media_kit_native_event_loop: ^1.0.8
+  media_kit_libs_android: ^1.2.0  # 必须添加，提供 libmpv.so
 
+  # 网络请求
   dio: ^5.4.0
+
+  # XML 解析
   xml: ^6.5.0
+
+  # JSON 序列化
   json_annotation: ^4.8.1
+
+  # 本地存储
   shared_preferences: ^2.2.2
+
+  # 状态管理
   provider: ^6.1.1
+
+  # 文件路径
   path_provider: ^2.1.2
+
+  # SVG 图标（可选）
   flutter_svg: ^2.0.9
 
 dev_dependencies:
@@ -41,7 +55,3 @@ flutter_launcher_icons:
   min_sdk_android: 21
   adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "ico/ic_launcher.png"
-
-# 强制覆盖版本，确保一致性
-dependency_overrides:
-  media_kit_video: 1.2.0
