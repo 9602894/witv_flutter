@@ -8,40 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
-    name: Build Windows (x64)
-    runs-on: windows-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.22.0'
-          channel: 'stable'
-
-      - name: Enable Windows desktop support
-        run: flutter config --enable-windows-desktop
-
-      - name: Clean pub cache
-        run: flutter pub cache repair
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Ensure Windows project exists
-        run: flutter create --platforms=windows .
-
-      - name: Build Windows release
-        run: flutter build windows --release
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: witv-windows-x64
-          path: build/windows/x64/runner/Release/
-
   build-android:
     name: Build Android (APK)
     runs-on: ubuntu-latest
@@ -64,15 +30,12 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 移除可能导致冲突的插件
-      - name: Remove problematic plugins
-        run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
+      - name: Clean Gradle caches
+        run: |
+          rm -rf ~/.gradle/caches/
+          rm -rf android/.gradle/
 
       - name: Build Android APK (release)
-      - name: Clean Gradle cache
-  run: |
-    rm -rf ~/.gradle/caches/
-    rm -rf android/.gradle/
         run: flutter build apk --release
 
       - name: Upload Android APK
@@ -80,34 +43,3 @@ jobs:
         with:
           name: witv-android-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-
-  release:
-    name: Create Release and Upload Assets
-    needs: [build-windows, build-android]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: witv-windows-x64
-          path: ./windows-build
-
-      - name: Download Android APK
-        uses: actions/download-artifact@v4
-        with:
-          name: witv-android-apk
-          path: ./android-build
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            ./windows-build/*.exe
-            ./windows-build/*.dll
-            ./windows-build/data/
-            ./android-build/app-release.apk
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
