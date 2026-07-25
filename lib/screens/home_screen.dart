@@ -47,7 +47,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _init() async {
     await _loadConfigAndEpg();
     await _loadInitialSource();
-    // 检查是否有选中的订阅源
     final settings = Provider.of<SettingsService>(context, listen: false);
     final hasSelected = settings.subscriptions.any((s) => s.selected);
     setState(() {
@@ -69,10 +68,13 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text('当前没有可用的订阅源，请先添加订阅源。'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => SettingsScreen()),
-              ),
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SettingsScreen()),
+                );
+              },
               child: Text('去设置'),
             ),
             TextButton(
@@ -152,7 +154,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // 即使没有订阅，也显示界面，但对话框会覆盖
     return Scaffold(
       body: Stack(
         children: [
@@ -212,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          // 信息弹窗触发
+          // 信息弹窗触发（点击屏幕下半部分）
           Positioned(
             bottom: 0,
             left: 0,
