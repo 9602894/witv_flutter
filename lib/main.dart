@@ -4,20 +4,19 @@ import 'package:media_kit/media_kit.dart';
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
 import 'services/log_service.dart';
+import 'dart:io';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 使用 Future.microtask 延迟初始化，避免阻塞 runApp
-  Future.microtask(() {
-    try {
-      MediaKit.ensureInitialized();
-      LogService.write('MediaKit 初始化成功');
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-    }
-  });
+  // 同步初始化 MediaKit，确保在构建播放器前完成
+  try {
+    MediaKit.ensureInitialized();
+    await LogService.write('MediaKit 初始化成功');
+  } catch (e, stack) {
+    await LogService.writeCrashLog(e, stack);
+  }
 
   // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
