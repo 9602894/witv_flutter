@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart' as path_provider;
 import '../models/subscription.dart';
 import 'dart:convert';
-import 'dart:io';
 import 'log_service.dart';
 
 class SettingsService extends ChangeNotifier {
@@ -11,7 +11,7 @@ class SettingsService extends ChangeNotifier {
   bool _needsRefresh = false;
   int _decoderIndex = 0;
   String? _lastChannel;
-  bool _autoReconnect = true; // 默认开启
+  bool _autoReconnect = true; // 默认开启重连
 
   List<Subscription> get subscriptions => _subscriptions;
   bool get needsRefresh => _needsRefresh;
@@ -34,7 +34,7 @@ class SettingsService extends ChangeNotifier {
       _decoderIndex = prefs.getInt('decoder_index') ?? 0;
       _lastChannel = prefs.getString('last_channel');
       _autoReconnect = prefs.getBool('auto_reconnect') ?? true;
-      await LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条，解码器索引 $_decoderIndex，自动重连: $_autoReconnect');
+      await LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条，解码器索引 $_decoderIndex，重连: $_autoReconnect');
     } catch (e, stack) {
       await LogService.writeCrashLog(e, stack);
     }
@@ -99,17 +99,17 @@ class SettingsService extends ChangeNotifier {
 
   String? getLastChannel() => _lastChannel;
 
-  void toggleAutoReconnect() async {
-    _autoReconnect = !_autoReconnect;
+  void setAutoReconnect(bool value) async {
+    _autoReconnect = value;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('auto_reconnect', _autoReconnect);
-    await LogService.write('自动重连切换为: $_autoReconnect');
+    await prefs.setBool('auto_reconnect', value);
+    await LogService.write('断线重连设置为: $value');
     notifyListeners();
   }
 
   // 获取订阅源缓存目录
   static Future<Directory> getCacheDir() async {
-    final appDocDir = await getApplicationDocumentsDirectory();
+    final appDocDir = await path_provider.getApplicationDocumentsDirectory();
     final cacheDir = Directory('${appDocDir.path}/playlist_cache');
     if (!await cacheDir.exists()) {
       await cacheDir.create(recursive: true);
