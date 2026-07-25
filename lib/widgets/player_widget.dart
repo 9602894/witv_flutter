@@ -43,11 +43,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       final decoder = settings.decoderIndex;
       _currentDecoder = decoder;
 
-      // 配置解码方式：0=自动(null), 1=硬解(true), 2=软解(false)
+      // 解码配置
       bool? hardwareDecoding;
-      if (decoder == 1) hardwareDecoding = true;
-      else if (decoder == 2) hardwareDecoding = false;
-      // else 自动，不设置
+      if (decoder == 1) hardwareDecoding = true;      // 硬解
+      else if (decoder == 2) hardwareDecoding = false; // 软解
+      // decoder == 0 自动，不设置 hardwareDecoding
 
       final config = PlayerConfiguration(
         hardwareDecoding: hardwareDecoding,
@@ -76,21 +76,18 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized) return;
     LogService.write('播放: $url');
     player.open(Media(url));
-    // 速度监听
     player.stream.buffer.listen((buffer) {
       if (buffer.inMilliseconds > 0) {
         final speed = buffer.inMilliseconds / 1024;
         widget.onSpeedUpdate(speed);
       }
     });
-    // 错误重连
     player.stream.error.listen((error) {
       LogService.write('播放错误: $error');
       if (!isReconnecting) {
         _attemptReconnect();
       }
     });
-    // 播放完成自动续播
     player.stream.completed.listen((_) {
       LogService.write('播放完成，重新准备');
       if (player != null) {
