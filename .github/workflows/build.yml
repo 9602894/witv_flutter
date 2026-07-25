@@ -58,34 +58,26 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 🔧 修补 screen_brightness_android 插件（定位主构建文件，排除 example）
+      # 🔧 彻底删除 screen_brightness_android 插件中的 compilerOptions 块
       - name: Patch screen_brightness_android build.gradle.kts
         run: |
-          # 查找主插件的 build.gradle.kts（排除 example/ 和 test/）
           PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/screen_brightness_android*/android/build.gradle.kts" | grep -v "/example/" | head -n 1)
           if [ -z "$PLUGIN_FILE" ]; then
             echo "❌ 未找到 screen_brightness_android 主构建文件"
             exit 1
           fi
           echo "📄 找到主文件: $PLUGIN_FILE"
-          
-          # 备份原文件
           cp "$PLUGIN_FILE" "$PLUGIN_FILE.bak"
-          
-          # 删除包含 jvmTarget 和 kotlinOptions 的行（它们导致错误）
-          # 使用 sed 删除包含 "kotlinOptions" 或 "jvmTarget" 的行（整行）
-          sed -i '/kotlinOptions/d' "$PLUGIN_FILE"
-          sed -i '/jvmTarget/d' "$PLUGIN_FILE"
-          
-          echo "✅ 已删除有问题的行"
-          
+          # 使用 Perl 删除 compilerOptions 块（包括大括号内容）
+          perl -0777 -i -pe 's/\s*compilerOptions\s*\{[^}]*\}//g' "$PLUGIN_FILE"
+          echo "✅ 已删除 compilerOptions 块"
           # 验证删除成功
-          if grep -q "kotlinOptions\|jvmTarget" "$PLUGIN_FILE"; then
-            echo "❌ 删除失败，仍存在相关行"
-            cat "$PLUGIN_FILE" | grep -n "kotlinOptions\|jvmTarget"
+          if grep -q "compilerOptions" "$PLUGIN_FILE"; then
+            echo "❌ compilerOptions 仍存在"
+            cat "$PLUGIN_FILE" | grep -n "compilerOptions"
             exit 1
           else
-            echo "✅ 验证通过，已清除所有问题行"
+            echo "✅ 验证通过，已清除 compilerOptions"
           fi
 
       - name: Build Android APK (release)
