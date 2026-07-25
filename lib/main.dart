@@ -9,22 +9,21 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 初始化 media_kit（同步方法，不阻塞）
-  MediaKit.ensureInitialized();
-
-  // 捕获 Flutter 框架错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
   };
-
-  // 捕获 Dart 同步/异步错误
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
     LogService.writeCrashLog(error, stack);
     return true;
   };
 
   runApp(MyApp());
+
+  Future.microtask(() {
+    MediaKit.ensureInitialized();
+    LogService.write('MediaKit 初始化成功');
+  });
 }
 
 class MyApp extends StatelessWidget {
