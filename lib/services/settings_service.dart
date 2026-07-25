@@ -7,9 +7,11 @@ import 'log_service.dart';
 class SettingsService extends ChangeNotifier {
   List<Subscription> _subscriptions = [];
   bool _needsRefresh = false;
+  int _decoderIndex = 0; // 0=自动, 1=硬解, 2=软解
 
   List<Subscription> get subscriptions => _subscriptions;
   bool get needsRefresh => _needsRefresh;
+  int get decoderIndex => _decoderIndex;
 
   SettingsService() {
     _load();
@@ -22,10 +24,9 @@ class SettingsService extends ChangeNotifier {
       if (subsJson != null) {
         final list = jsonDecode(subsJson) as List;
         _subscriptions = list.map((e) => Subscription.fromJson(e)).toList();
-        await LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条');
-      } else {
-        await LogService.write('SettingsService: SharedPreferences 中无订阅源数据');
       }
+      _decoderIndex = prefs.getInt('decoder_index') ?? 0;
+      await LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条，解码器索引 $_decoderIndex');
     } catch (e, stack) {
       await LogService.writeCrashLog(e, stack);
     }
@@ -71,5 +72,13 @@ class SettingsService extends ChangeNotifier {
 
   void clearRefreshFlag() {
     _needsRefresh = false;
+  }
+
+  void setDecoderIndex(int index) async {
+    _decoderIndex = index;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('decoder_index', index);
+    await LogService.write('解码器切换为: $index');
+    notifyListeners();
   }
 }
