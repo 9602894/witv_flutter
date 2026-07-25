@@ -69,6 +69,10 @@ jobs:
         run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
 
       - name: Build Android APK (release)
+      - name: Clean Gradle cache
+  run: |
+    rm -rf ~/.gradle/caches/
+    rm -rf android/.gradle/
         run: flutter build apk --release
 
       - name: Upload Android APK
