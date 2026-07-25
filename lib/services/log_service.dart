@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart'; // 如需分享日志，可添加此依赖
 
 class LogService {
   static final LogService _instance = LogService._internal();
@@ -14,7 +13,6 @@ class LogService {
   static Future<void> init() async {
     final dir = await getApplicationDocumentsDirectory();
     _logFile = File('${dir.path}/$logFileName');
-    // 如果文件超过 1MB，清空
     if (await _logFile!.exists()) {
       final size = await _logFile!.length();
       if (size > 1024 * 1024) {
