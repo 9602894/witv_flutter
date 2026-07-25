@@ -9,8 +9,9 @@ dependencies:
   flutter:
     sdk: flutter
 
-  media_kit: ^1.1.10
-  media_kit_video: 1.2.4
+  # 升级 media_kit 到最新稳定版
+  media_kit: ^1.2.0
+  media_kit_video: ^1.2.0
   media_kit_native_event_loop: ^1.0.8
 
   dio: ^5.4.0
@@ -41,5 +42,6 @@ flutter_launcher_icons:
   adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "ico/ic_launcher.png"
 
+# 覆盖版本以防冲突
 dependency_overrides:
-  media_kit_video: 1.2.4
+  media_kit_video: 1.2.0
