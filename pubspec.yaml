@@ -9,8 +9,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  media_kit: ^1.1.10
-  media_kit_video: 1.2.4        # 固定兼容版本
+  media_kit: 1.1.10
+  media_kit_video: 1.2.4
   media_kit_native_event_loop: ^1.0.8
   media_kit_libs_android_video: ^1.0.0
 
