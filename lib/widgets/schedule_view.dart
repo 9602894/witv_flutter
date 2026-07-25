@@ -8,6 +8,10 @@ class ScheduleView extends StatefulWidget {
   final Channel? selectedChannel;
   final Map<String, List<EpgProgram>> epgMap;
   final ValueChanged<Channel> onSelectChannel;
+  final double leftWeight;
+  final double rightWeight;
+  final ValueChanged<double> onLeftWeightChanged;
+  final bool isEditMode;
 
   const ScheduleView({
     Key? key,
@@ -15,6 +19,10 @@ class ScheduleView extends StatefulWidget {
     this.selectedChannel,
     required this.epgMap,
     required this.onSelectChannel,
+    this.leftWeight = 0.35,
+    this.rightWeight = 0.65,
+    required this.onLeftWeightChanged,
+    this.isEditMode = false,
   }) : super(key: key);
 
   @override
@@ -74,9 +82,9 @@ class _ScheduleViewState extends State<ScheduleView> {
 
     return Row(
       children: [
-        // 左侧频道列表（可编辑宽度，但在此为了简单固定比例）
+        // 左侧频道列表
         Expanded(
-          flex: 2,
+          flex: (widget.leftWeight * 100).toInt(),
           child: ChannelList(
             channels: widget.channels,
             selectedChannel: widget.selectedChannel,
@@ -84,9 +92,11 @@ class _ScheduleViewState extends State<ScheduleView> {
             epgMap: widget.epgMap,
           ),
         ),
-        VerticalDivider(width: 1),
+        // 拖拽分隔条（编辑模式可见）
+        _buildDragBar(),
+        // 右侧EPG列表
         Expanded(
-          flex: 3,
+          flex: (widget.rightWeight * 100).toInt(),
           child: Column(
             children: [
               // 日期标签
@@ -120,7 +130,6 @@ class _ScheduleViewState extends State<ScheduleView> {
                     final prog = dayPrograms[index];
                     final now = DateTime.now();
                     final isCurrent = prog.start.isBefore(now) && prog.end.isAfter(now);
-                    // 格式化时间：开始-结束
                     final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
                     return Container(
                       color: isCurrent ? Colors.blue.withOpacity(0.4) : Colors.transparent,
@@ -151,6 +160,21 @@ class _ScheduleViewState extends State<ScheduleView> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDragBar() {
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        if (!widget.isEditMode) return;
+        final delta = details.delta.dx / MediaQuery.of(context).size.width;
+        final newLeft = (widget.leftWeight + delta).clamp(0.1, 0.9);
+        widget.onLeftWeightChanged(newLeft);
+      },
+      child: Container(
+        width: widget.isEditMode ? 6 : 2,
+        color: widget.isEditMode ? Colors.yellow : Colors.transparent,
+      ),
     );
   }
 
