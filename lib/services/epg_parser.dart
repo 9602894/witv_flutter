@@ -46,7 +46,10 @@ class EpgParser {
       final hashFile = File('${dir.path}/epg_hash.txt');
 
       bool needDownload = true;
-      final dio = Dio(BaseOptions(connectTimeout: Duration(seconds: 10), receiveTimeout: Duration(seconds: 15)));
+      final dio = Dio(BaseOptions(
+        connectTimeout: Duration(seconds: 10),
+        receiveTimeout: Duration(seconds: 15),
+      ));
       try {
         final hashUrl = '$url.hash';
         final hashResponse = await dio.get(hashUrl);
@@ -87,14 +90,20 @@ class EpgParser {
       await LogService.write('EPG中频道数: ${displayNameToChannelId.length}');
 
       int programCount = 0;
+      int errorCount = 0;
       for (var prog in document.findAllElements('programme')) {
         final channelId = prog.getAttribute('channel')!;
-        String startStr = prog.getAttribute('start')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
-        String stopStr = prog.getAttribute('stop')!.replaceAll(RegExp(r'[+\-]\d+$'), '');
+        String startStr = prog.getAttribute('start')!
+            .replaceAll(RegExp(r'[+\-]\d+$'), '')
+            .trim();
+        String stopStr = prog.getAttribute('stop')!
+            .replaceAll(RegExp(r'[+\-]\d+$'), '')
+            .trim();
+
         try {
-          // 支持 yyyyMMddHHmmss 格式（无分隔符）
           DateTime start, stop;
-          if (startStr.contains(RegExp(r'^\d{14}$'))) {
+          // 处理 yyyyMMddHHmmss 格式
+          if (RegExp(r'^\d{14}$').hasMatch(startStr)) {
             start = DateTime(
               int.parse(startStr.substring(0, 4)),
               int.parse(startStr.substring(4, 6)),
@@ -106,7 +115,7 @@ class EpgParser {
           } else {
             start = DateTime.parse(startStr);
           }
-          if (stopStr.contains(RegExp(r'^\d{14}$'))) {
+          if (RegExp(r'^\d{14}$').hasMatch(stopStr)) {
             stop = DateTime(
               int.parse(stopStr.substring(0, 4)),
               int.parse(stopStr.substring(4, 6)),
@@ -125,11 +134,19 @@ class EpgParser {
           allPrograms[channelId]!.add(EpgProgram(start: start, end: stop, title: title, desc: desc));
           programCount++;
         } catch (e) {
-          await LogService.write('解析节目失败: $e');
+          errorCount++;
+          // 只记录前10个错误，避免日志过大
+          if (errorCount <= 10) {
+            await LogService.write('解析节目失败: $e, start=$startStr, stop=$stopStr');
+          }
         }
+      }
+      if (errorCount > 10) {
+        await LogService.write('解析节目失败次数过多，共 $errorCount 条，已省略后续详细日志');
       }
       await LogService.write('EPG节目总条目数: $programCount');
 
+      // 映射
       final mapped = <String, List<EpgProgram>>{};
       int successCount = 0, failCount = 0;
       for (var entry in _aliasMap!.entries) {
