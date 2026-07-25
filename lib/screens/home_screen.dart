@@ -32,19 +32,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showEpgInfo = false;
 
   // 三列宽度权重
-  double subWeight = 0.20;   // 订阅源列表（含收藏）
-  double groupWeight = 0.20; // 分组列表
-  double channelWeight = 0.60; // 频道列表
-
-  double scheduleLeftWeight = 0.35;
-  double scheduleRightWeight = 0.65;
+  double subWeight = 0.20;
+  double groupWeight = 0.20;
+  double channelWeight = 0.60;
 
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
-
-  // 当前选中的订阅源名称（高亮）
   String? currentSubName;
 
   @override
@@ -64,6 +59,10 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         if (_showRightMenu) {
           setState(() => _showRightMenu = false);
+          return false;
+        }
+        if (showChannelList) {
+          setState(() => showChannelList = false);
           return false;
         }
         final shouldExit = await showDialog<bool>(
@@ -99,19 +98,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // 主覆盖层（三列布局，透明背景）
+            // 主覆盖层
             if (!isScheduleMode)
               Positioned.fill(
                 child: Container(
                   color: Colors.transparent,
                   child: Row(
                     children: [
-                      // 第一列：我的收藏 + 订阅源列表
+                      // 第一列：订阅源列表
                       Expanded(
                         flex: (subWeight * 100).toInt(),
                         child: _buildSubscriptionList(),
                       ),
-                      // 分隔条
                       _buildDragBar(
                         onDrag: (delta) {
                           setState(() {
@@ -137,7 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         flex: (groupWeight * 100).toInt(),
                         child: _buildGroupList(),
                       ),
-                      // 分隔条
                       _buildDragBar(
                         onDrag: (delta) {
                           setState(() {
@@ -158,25 +155,64 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
-                      // 第三列：频道列表（显示台标或首字）
+                      // 第三列：频道列表 + 节目单按钮
                       Expanded(
                         flex: (channelWeight * 100).toInt(),
-                        child: ChannelList(
-                          channels: channels,
-                          selectedChannel: currentChannel,
-                          onSelect: (ch) {
-                            LogService.write('选择频道: ${ch.name}');
-                            setState(() {
-                              currentChannel = ch;
-                              _showEpgInfo = true;
-                            });
-                            // 保存上次播放的频道
-                            Provider.of<SettingsService>(context, listen: false)
-                                .saveLastChannel(ch.name);
-                          },
-                          epgMap: epgMap,
-                          showChannelNumber: false,
-                          showLogo: true, // 显示台标或首字
+                        child: Column(
+                          children: [
+                            // 频道列表上方：节目单按钮
+                            Container(
+                              color: Colors.transparent,
+                              padding: EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        isScheduleMode = true;
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        '节目单',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(width: 8),
+                                ],
+                              ),
+                            ),
+                            // 频道列表
+                            Expanded(
+                              child: ChannelList(
+                                channels: channels,
+                                selectedChannel: currentChannel,
+                                onSelect: (ch) {
+                                  LogService.write('选择频道: ${ch.name}');
+                                  setState(() {
+                                    currentChannel = ch;
+                                    _showEpgInfo = true;
+                                  });
+                                  Provider.of<SettingsService>(context, listen: false)
+                                      .saveLastChannel(ch.name);
+                                },
+                                epgMap: epgMap,
+                                showChannelNumber: false,
+                                showLogo: true,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -184,35 +220,55 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 节目单模式
+            // 节目单模式（覆盖频道列表，左侧有返回按钮）
             if (isScheduleMode)
               Positioned.fill(
                 child: Container(
                   color: Colors.transparent,
-                  child: ScheduleView(
-                    channels: channels,
-                    selectedChannel: currentChannel,
-                    epgMap: epgMap,
-                    onSelectChannel: (ch) => setState(() {
-                      currentChannel = ch;
-                      _showEpgInfo = true;
-                      Provider.of<SettingsService>(context, listen: false)
-                          .saveLastChannel(ch.name);
-                    }),
-                    leftWeight: scheduleLeftWeight,
-                    rightWeight: scheduleRightWeight,
-                    onLeftWeightChanged: (newLeft) {
-                      setState(() {
-                        scheduleLeftWeight = newLeft.clamp(0.1, 0.9);
-                        scheduleRightWeight = 1 - scheduleLeftWeight;
-                      });
-                    },
-                    isEditMode: isEditMode,
+                  child: Stack(
+                    children: [
+                      ScheduleView(
+                        channels: channels,
+                        selectedChannel: currentChannel,
+                        epgMap: epgMap,
+                        onSelectChannel: (ch) => setState(() {
+                          currentChannel = ch;
+                          _showEpgInfo = true;
+                          Provider.of<SettingsService>(context, listen: false)
+                              .saveLastChannel(ch.name);
+                        }),
+                      ),
+                      // 左上角返回按钮（关闭节目单）
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: GestureDetector(
+                          onTap: () => setState(() => isScheduleMode = false),
+                          child: Container(
+                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                                SizedBox(width: 4),
+                                Text(
+                                  '频道组',
+                                  style: TextStyle(color: Colors.white, fontSize: 14),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
 
-            // 右侧菜单（返回键）
+            // 右侧菜单
             if (_showRightMenu)
               Positioned(
                 top: 0,
@@ -234,12 +290,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       _buildMenuItem(Icons.edit, '编辑', () {
                         setState(() {
                           isEditMode = !isEditMode;
-                          _showRightMenu = false;
-                        });
-                      }),
-                      _buildMenuItem(Icons.schedule, '节目单', () {
-                        setState(() {
-                          isScheduleMode = !isScheduleMode;
                           _showRightMenu = false;
                         });
                       }),
@@ -301,10 +351,6 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(Icons.schedule, color: Colors.white),
-                    onPressed: () => setState(() => isScheduleMode = !isScheduleMode),
-                  ),
-                  IconButton(
                     icon: Icon(Icons.edit, color: Colors.white),
                     onPressed: () => setState(() => isEditMode = !isEditMode),
                   ),
@@ -336,10 +382,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text('分组 ${(groupWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
                       SizedBox(width: 16),
                       Text('频道 ${(channelWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      if (isScheduleMode) ...[
-                        SizedBox(width: 16),
-                        Text('节目单左 ${(scheduleLeftWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      ],
                       SizedBox(width: 16),
                       ElevatedButton(
                         onPressed: () => setState(() => isEditMode = false),
@@ -365,7 +407,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 第一列：我的收藏 + 订阅源列表 ==========
+  // ========== 订阅源列表 ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -377,10 +419,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       color: Colors.transparent,
       child: ListView.builder(
-        itemCount: subs.length + 1, // +1 为“我的收藏”
+        itemCount: subs.length + 1,
         itemBuilder: (context, index) {
           if (index == 0) {
-            // 我的收藏（固定）
             return ListTile(
               leading: Icon(Icons.favorite, color: Colors.yellow, size: 16),
               title: Text(
@@ -392,13 +433,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               onTap: () {
-                // 切换到收藏分组（需实现）
+                // 收藏功能待实现
               },
             );
           }
           final sub = subs[index - 1];
           final isSelected = sub.selected;
-          // 高亮当前选中的订阅源名称
           return ListTile(
             title: Text(
               sub.name,
@@ -418,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 第二列：分组列表 ==========
+  // ========== 分组列表 ==========
   Widget _buildGroupList() {
     return Container(
       color: Colors.transparent,
@@ -427,9 +467,11 @@ class _HomeScreenState extends State<HomeScreen> {
         itemBuilder: (context, index) {
           final group = groups[index];
           final isSelected = group == currentGroup;
+          // 不显示分组名称中的逗号
+          final displayName = group.replaceAll(',', '');
           return ListTile(
             title: Text(
-              group,
+              displayName,
               style: TextStyle(
                 color: isSelected ? Colors.yellow : Colors.white,
                 fontSize: 13,
@@ -447,7 +489,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 拖拽分隔条 ==========
+  // ========== 拖拽条 ==========
   Widget _buildDragBar({required Function(double delta) onDrag, required bool isEditMode}) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -501,7 +543,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 对话框：添加列表订阅 ==========
+  // ========== 对话框 ==========
   void _showAddSubscriptionDialog() {
     final nameCtrl = TextEditingController();
     final urlCtrl = TextEditingController();
@@ -525,7 +567,6 @@ class _HomeScreenState extends State<HomeScreen> {
               if (name.isNotEmpty && url.isNotEmpty) {
                 final settings = Provider.of<SettingsService>(context, listen: false);
                 settings.addSubscription(Subscription(name: name, url: url, selected: true));
-                // 保存到本地缓存文件（由 PlaylistParser 处理）
                 _reloadData();
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已添加订阅: $name')));
@@ -538,7 +579,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 对话框：添加 EPG 订阅 ==========
   void _showAddEpgDialog() {
     final ctrl = TextEditingController();
     showDialog(
@@ -570,7 +610,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 数据加载方法 =====
+  // ===== 数据加载 =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
@@ -708,29 +748,25 @@ class _HomeScreenState extends State<HomeScreen> {
       currentSubName = sub.name;
       final url = sub.url;
       LogService.write('订阅源 URL: $url');
-      
-      // 检查本地缓存文件
+
+      // 从缓存或网络加载
       final cacheFile = await PlaylistParser.getCacheFile(url, sub.name);
       Map<String, List<Channel>> groupMap;
       if (await cacheFile.exists()) {
-        // 从缓存加载
         LogService.write('从缓存加载: ${cacheFile.path}');
         final content = await cacheFile.readAsString();
         groupMap = PlaylistParser.parseFromString(content);
       } else {
-        // 从网络下载并缓存
         groupMap = await PlaylistParser.parseFromUrl(url);
-        // 保存到缓存
         await PlaylistParser.saveCache(groupMap, url, sub.name);
       }
-      
+
       setState(() {
         groups = groupMap.keys.toList();
         if (groups.isNotEmpty) {
           currentGroup = groups.first;
           channels = groupMap[currentGroup]!;
           if (channels.isNotEmpty) {
-            // 尝试恢复上次播放的频道
             final lastChannel = settings.getLastChannel();
             if (lastChannel != null) {
               final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
