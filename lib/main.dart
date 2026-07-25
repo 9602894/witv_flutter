@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:media_kit/media_kit.dart';
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
 import 'services/log_service.dart';
@@ -9,13 +8,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  try {
-    MediaKit.ensureInitialized();
-    await LogService.write('MediaKit 初始化成功');
-  } catch (e, stack) {
-    await LogService.writeCrashLog(e, stack);
-  }
-
+  // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
