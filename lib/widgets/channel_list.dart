@@ -34,7 +34,6 @@ class ChannelList extends StatelessWidget {
             }
           }
         }
-
         return ListTile(
           selected: isSelected,
           selectedTileColor: Colors.blue.withOpacity(0.3),
