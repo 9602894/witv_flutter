@@ -7,39 +7,43 @@ class ConfigService {
   static const String configFileName = 'configuration.json';
   static Map<String, dynamic>? _config;
 
+  // 返回 Configuration 对象（直接返回内部 map）
   static Future<Map<String, dynamic>> getConfig() async {
     if (_config != null) return _config!;
-    // 优先从外部存储加载
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$configFileName');
     String jsonString;
     if (await file.exists()) {
       jsonString = await file.readAsString();
     } else {
-      // 从 assets 复制到外部
       jsonString = await rootBundle.loadString('assets/$configFileName');
       await file.writeAsString(jsonString);
     }
-    _config = jsonDecode(jsonString) as Map<String, dynamic>;
+    final fullMap = jsonDecode(jsonString) as Map<String, dynamic>;
+    // 假设结构为 {"Configuration": {...}}
+    _config = fullMap['Configuration'] as Map<String, dynamic>? ?? fullMap;
     return _config!;
   }
 
   static Future<void> saveConfig(Map<String, dynamic> config) async {
+    // 保存时重新包装成 {"Configuration": config}
+    final fullMap = {'Configuration': config};
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$configFileName');
-    await file.writeAsString(jsonEncode(config));
+    await file.writeAsString(jsonEncode(fullMap));
     _config = config;
   }
 
   static Future<void> resetToDefault() async {
     final jsonString = await rootBundle.loadString('assets/$configFileName');
+    final fullMap = jsonDecode(jsonString) as Map<String, dynamic>;
+    final config = fullMap['Configuration'] as Map<String, dynamic>? ?? fullMap;
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$configFileName');
-    await file.writeAsString(jsonString);
-    _config = jsonDecode(jsonString) as Map<String, dynamic>;
+    await file.writeAsString(jsonEncode({'Configuration': config}));
+    _config = config;
   }
 
-  // 备份：复制 configuration.json 到备份目录
   static Future<void> backup() async {
     final dir = await getApplicationDocumentsDirectory();
     final src = File('${dir.path}/$configFileName');
@@ -50,7 +54,6 @@ class ConfigService {
     await src.copy(backupFile.path);
   }
 
-  // 恢复：从备份列表中选择一个覆盖
   static Future<List<File>> getBackupFiles() async {
     final dir = await getApplicationDocumentsDirectory();
     final backupDir = Directory('${dir.path}/backup');
@@ -62,6 +65,8 @@ class ConfigService {
     final dir = await getApplicationDocumentsDirectory();
     final target = File('${dir.path}/$configFileName');
     await backupFile.copy(target.path);
-    _config = jsonDecode(await target.readAsString()) as Map<String, dynamic>;
+    final jsonString = await target.readAsString();
+    final fullMap = jsonDecode(jsonString) as Map<String, dynamic>;
+    _config = fullMap['Configuration'] as Map<String, dynamic>? ?? fullMap;
   }
 }
