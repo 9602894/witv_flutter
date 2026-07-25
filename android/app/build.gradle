@@ -40,6 +40,7 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+        // 指定 jniLibs 目录（我们将手动放入 libmpv.so）
         main.jniLibs.srcDirs = ['src/main/jniLibs']
     }
 
