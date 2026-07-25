@@ -22,12 +22,12 @@ class SettingsService extends ChangeNotifier {
       if (subsJson != null) {
         final list = jsonDecode(subsJson) as List;
         _subscriptions = list.map((e) => Subscription.fromJson(e)).toList();
-        LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条');
+        await LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条');
       } else {
-        LogService.write('SettingsService: SharedPreferences 中无订阅源数据');
+        await LogService.write('SettingsService: SharedPreferences 中无订阅源数据');
       }
     } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
+      await LogService.writeCrashLog(e, stack);
     }
     notifyListeners();
   }
@@ -37,9 +37,9 @@ class SettingsService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final json = jsonEncode(_subscriptions.map((e) => e.toJson()).toList());
       await prefs.setString('subscriptions', json);
-      LogService.write('SettingsService: 订阅源已保存 ${_subscriptions.length} 条');
+      await LogService.write('SettingsService: 订阅源已保存 ${_subscriptions.length} 条');
     } catch (e) {
-      LogService.write('SettingsService: 保存订阅源失败: $e');
+      await LogService.write('SettingsService: 保存订阅源失败: $e');
     }
   }
 
