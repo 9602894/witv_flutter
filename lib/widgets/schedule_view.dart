@@ -69,8 +69,9 @@ class _ScheduleViewState extends State<ScheduleView> {
     List<EpgProgram> dayPrograms = [];
     if (selectedDayIndex < dayLabels.length) {
       final targetDay = dayLabels[selectedDayIndex];
+      // 显式转换为 List<EpgProgram>
       dayPrograms = programs.where((p) =>
-          '${p.start.year}-${p.start.month}-${p.start.day}' == targetDay).toList();
+          '${p.start.year}-${p.start.month}-${p.start.day}' == targetDay).cast<EpgProgram>().toList();
     }
 
     return Row(
