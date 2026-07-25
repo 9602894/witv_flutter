@@ -120,6 +120,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           ..._buildConfigWidgets(),
           Divider(),
+          // 解码器选择
+          Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ListTile(
+            title: Text('解码方式'),
+            subtitle: Text(['自动', '硬解', '软解'][settings.decoderIndex]),
+            trailing: IconButton(
+              icon: Icon(Icons.arrow_forward_ios),
+              onPressed: () => _showDecoderDialog(context),
+            ),
+          ),
+          Divider(),
           Text('订阅源管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ...settings.subscriptions.map((sub) => ListTile(
                 title: Text(sub.name),
@@ -155,6 +166,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _showDecoderDialog(BuildContext context) {
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('选择解码方式'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<int>(
+              title: Text('自动'),
+              value: 0,
+              groupValue: settings.decoderIndex,
+              onChanged: (v) {
+                settings.setDecoderIndex(v!);
+                Navigator.pop(context);
+              },
+            ),
+            RadioListTile<int>(
+              title: Text('硬解'),
+              value: 1,
+              groupValue: settings.decoderIndex,
+              onChanged: (v) {
+                settings.setDecoderIndex(v!);
+                Navigator.pop(context);
+              },
+            ),
+            RadioListTile<int>(
+              title: Text('软解'),
+              value: 2,
+              groupValue: settings.decoderIndex,
+              onChanged: (v) {
+                settings.setDecoderIndex(v!);
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
+        ],
+      ),
+    );
+  }
+
+  // ... 其余方法（_buildConfigWidgets, _editEpgDialog, _addSubscriptionDialog）保持不变，但为了完整性保留
   List<Widget> _buildConfigWidgets() {
     final widgets = <Widget>[];
     config!.forEach((key, value) {
