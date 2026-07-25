@@ -8,16 +8,35 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # 播放器核心（支持 Windows/Android/Linux/macOS）
   media_kit: ^1.1.10
   media_kit_video: ^1.2.4
   media_kit_native_event_loop: ^1.0.8
+
+  # 网络请求
   dio: ^5.4.0
+
+  # XML 解析（EPG）
   xml: ^6.5.0
+
+  # JSON 序列化
   json_annotation: ^4.8.1
+
+  # 本地存储
   shared_preferences: ^2.2.2
+
+  # 状态管理
   provider: ^6.1.1
+
+  # 文件路径（用于缓存）
   path_provider: ^2.1.2
+
+  # SVG 图标（可选）
   flutter_svg: ^2.0.9
+
+  # 屏幕亮度调节（如果不需要可删除此行）
+  # screen_brightness: ^2.0.0   # 注释掉，避免编译问题
 
 dev_dependencies:
   flutter_test:
@@ -29,5 +48,7 @@ flutter:
   assets:
     - assets/configuration.json
     - assets/epg_data.json
-dependency_overrides:
-  screen_brightness_android: 2.1.7
+
+# 如果保留了 screen_brightness，可在此覆盖版本以解决兼容性问题
+# dependency_overrides:
+#   screen_brightness: 2.2.0+1   # 使用兼容版本
