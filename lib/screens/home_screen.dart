@@ -31,12 +31,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isEditMode = false;
   bool _showRightMenu = false;
 
-  // 主界面三个窗口权重
   double subWeight = 0.15;
   double groupWeight = 0.20;
   double channelWeight = 0.65;
 
-  // 节目单左右窗口权重
   double scheduleLeftWeight = 0.35;
   double scheduleRightWeight = 0.65;
 
@@ -56,13 +54,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 按返回键：切换右侧菜单显示状态，不退出
+        // 按返回键：切换右侧菜单显示
         setState(() {
           _showRightMenu = !_showRightMenu;
-          // 如果显示菜单，隐藏覆盖层（可选）
           if (_showRightMenu) showOverlay = false;
         });
-        return false; // 阻止退出
+        return false;
       },
       child: Scaffold(
         body: Stack(
@@ -79,10 +76,9 @@ class _HomeScreenState extends State<HomeScreen> {
             if (showOverlay && !isScheduleMode)
               Positioned.fill(
                 child: Container(
-                  color: Colors.transparent, // 完全透明
+                  color: Colors.transparent,
                   child: Row(
                     children: [
-                      // 订阅列表
                       Expanded(
                         flex: (subWeight * 100).toInt(),
                         child: _buildSubscriptionList(),
@@ -159,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 节目单模式（透明背景，可编辑宽度）
+            // 节目单模式（透明背景）
             if (isScheduleMode)
               Positioned.fill(
                 child: Container(
@@ -229,7 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 顶部工具栏（快捷按钮）
+            // 顶部工具栏
             Positioned(
               top: 0,
               right: 0,
@@ -311,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 订阅列表
+  // ========== 订阅列表 ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -342,7 +338,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 拖拽条
   Widget _buildDragBar({required Function(double delta) onDrag, required bool isEditMode}) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -357,7 +352,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 菜单项
   Widget _buildMenuItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -443,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 数据加载（与之前相同） =====
+  // ===== 数据加载 =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
