@@ -57,16 +57,56 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _init() async {
-    // 先加载订阅源（快速显示界面）
+    // 第一步：从 SharedPreferences 加载已保存的订阅源（快速）
+    await _loadSavedSubscriptions();
+
+    // 第二步：如果没有订阅源，从配置添加默认源（后台）
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    if (settings.subscriptions.isEmpty) {
+      await _addDefaultSubscription();
+    }
+
+    // 第三步：加载选中的订阅源（显示频道列表）
     await _loadInitialSource();
     _checkSubscriptions();
+
     setState(() {
       isLoading = false;
     });
-    LogService.write('主页初始化完成，显示界面');
+    LogService.write('主页初始化完成');
 
     // 后台加载 EPG（不阻塞 UI）
     _loadEpgInBackground();
+  }
+
+  Future<void> _loadSavedSubscriptions() async {
+    // 已由 SettingsService 加载，无需额外操作
+    await Future.delayed(Duration.zero); // 确保加载完成
+  }
+
+  Future<void> _addDefaultSubscription() async {
+    try {
+      LogService.write('尝试从配置添加默认订阅源');
+      final config = await ConfigService.getConfig();
+      final inner = config['Configuration'] as Map<String, dynamic>?;
+      final liveUrl = inner?['LIVE_URLS'] as String?;
+      if (liveUrl != null && liveUrl.isNotEmpty) {
+        String name = '默认源';
+        String url = liveUrl;
+        if (liveUrl.contains(r'$')) {
+          final parts = liveUrl.split(r'$');
+          if (parts.length == 2) {
+            url = parts[0].trim();
+            name = parts[1].trim();
+          }
+        }
+        final settings = Provider.of<SettingsService>(context, listen: false);
+        settings.addSubscription(Subscription(name: name, url: url, selected: true));
+        LogService.write('自动添加默认订阅源: $name -> $url');
+      }
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
   }
 
   Future<void> _loadEpgInBackground() async {
@@ -81,7 +121,6 @@ class _HomeScreenState extends State<HomeScreen> {
           epgUrl = epgUrlRaw.split(r'$')[0].trim();
         }
         LogService.write('EPG URL (纯): $epgUrl');
-        // 设置超时 10 秒，防止卡死
         final map = await EpgParser.loadAllEpg(epgUrl).timeout(
           Duration(seconds: 30),
           onTimeout: () {
