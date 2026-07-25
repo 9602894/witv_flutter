@@ -1,27 +1,49 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:media_kit/media_kit.dart';
 import 'screens/home_screen.dart';
+import 'services/settings_service.dart';
 import 'services/log_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 写一条启动日志
-  await LogService.write('应用启动极简模式');
+  LogService.write('应用启动极简模式');
 
-  runApp(const MyApp());
+  // 初始化 MediaKit（异步不阻塞）
+  Future.microtask(() {
+    try {
+      MediaKit.ensureInitialized();
+      LogService.write('MediaKit 初始化成功');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  });
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.dumpErrorToConsole(details);
+    LogService.writeCrashLog(details.exception, details.stack);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    LogService.writeCrashLog(error, stack);
+    return true;
+  };
+
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Witv 测试',
-      theme: ThemeData.dark(),
-      home: const HomeScreen(),
-      debugShowCheckedModeBanner: false,
+    return ChangeNotifierProvider(
+      create: (_) => SettingsService(),
+      child: MaterialApp(
+        title: 'Witv',
+        theme: ThemeData.dark(),
+        home: HomeScreen(),
+        debugShowCheckedModeBanner: false,
+      ),
     );
   }
 }
