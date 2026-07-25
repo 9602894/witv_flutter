@@ -1,4 +1,4 @@
-import 'dart:io';   // 必须导入
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
@@ -120,10 +120,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<Widget> _buildConfigWidgets() {
     final widgets = <Widget>[];
+    if (config == null) return widgets;
     config!.forEach((key, value) {
-      if (key == 'EPG_URLS') return;
+      if (key == 'EPG_URLS') return; // 单独处理
       Widget widget;
-      if (value is bool) {
+      if (value == null) {
+        widget = ListTile(
+          title: Text(key),
+          subtitle: Text('null'),
+          trailing: IconButton(
+            icon: Icon(Icons.edit),
+            onPressed: () async {
+              final newVal = await showDialog<String>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: Text('编辑 $key'),
+                  content: TextField(
+                    controller: TextEditingController(),
+                    decoration: InputDecoration(labelText: '输入值 (可为空)'),
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
+                    TextButton(
+                      onPressed: () {
+                        final text = (context as dynamic).findAncestorStateOfType<TextField>()?.text;
+                        Navigator.pop(context, text);
+                      },
+                      child: Text('确定'),
+                    ),
+                  ],
+                ),
+              );
+              if (newVal != null) {
+                setState(() {
+                  if (newVal.isEmpty) config![key] = null;
+                  else config![key] = newVal;
+                });
+              }
+            },
+          ),
+        );
+      } else if (value is bool) {
         widget = SwitchListTile(
           title: Text(key),
           value: value,
@@ -158,7 +195,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       } else if (value is String) {
         widget = ListTile(
           title: Text(key),
-          subtitle: Text(value ?? '未设置'),
+          subtitle: Text(value),
           trailing: IconButton(
             icon: Icon(Icons.edit),
             onPressed: () async {
@@ -173,7 +210,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   actions: [
                     TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
                     TextButton(
-                      onPressed: () => Navigator.pop(context, (context as dynamic).findAncestorStateOfType<TextField>()?.text),
+                      onPressed: () {
+                        final text = (context as dynamic).findAncestorStateOfType<TextField>()?.text;
+                        Navigator.pop(context, text);
+                      },
                       child: Text('确定'),
                     ),
                   ],
@@ -188,7 +228,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       } else {
-        widget = ListTile(title: Text('$key: 不支持的类型'));
+        widget = ListTile(title: Text('$key: 不支持的类型 (${value.runtimeType})'));
       }
       widgets.add(widget);
     });
@@ -243,8 +283,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final name = nameCtrl.text.trim();
               final url = urlCtrl.text.trim();
               if (name.isNotEmpty && url.isNotEmpty) {
-                Provider.of<SettingsService>(context, listen: false)
-                    .addSubscription(Subscription(name: name, url: url));
+                final settings = Provider.of<SettingsService>(context, listen: false);
+                settings.addSubscription(Subscription(name: name, url: url));
                 Navigator.pop(context);
               }
             },
