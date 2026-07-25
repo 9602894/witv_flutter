@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:io' show exit;
 import '../services/settings_service.dart';
 import '../services/config_service.dart';
 import '../services/playlist_parser.dart';
@@ -12,7 +13,7 @@ import '../widgets/group_list.dart';
 import '../widgets/schedule_view.dart';
 import '../widgets/info_popup.dart';
 import '../widgets/edit_toolbar.dart';
-import 'settings_screen.dart';  // 添加这行
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -35,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
   bool isLoading = true;
+  bool _hasSubscriptions = false;
 
   @override
   void initState() {
@@ -45,8 +47,41 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _init() async {
     await _loadConfigAndEpg();
     await _loadInitialSource();
+    // 检查是否有选中的订阅源
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    final hasSelected = settings.subscriptions.any((s) => s.selected);
     setState(() {
       isLoading = false;
+      _hasSubscriptions = hasSelected || channels.isNotEmpty;
+    });
+    if (!_hasSubscriptions) {
+      _showNoSourceDialog();
+    }
+  }
+
+  void _showNoSourceDialog() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          title: Text('提示'),
+          content: Text('当前没有可用的订阅源，请先添加订阅源。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => SettingsScreen()),
+              ),
+              child: Text('去设置'),
+            ),
+            TextButton(
+              onPressed: () => exit(0),
+              child: Text('退出'),
+            ),
+          ],
+        ),
+      );
     });
   }
 
@@ -117,6 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    // 即使没有订阅，也显示界面，但对话框会覆盖
     return Scaffold(
       body: Stack(
         children: [
@@ -124,7 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (currentChannel != null)
             PlayerWidget(
               url: currentChannel!.url,
-              onError: () => print('播放错误'),  // 改为无参回调
+              onError: () => print('播放错误'),
               onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
             ),
           // 叠加层（频道列表等）
@@ -134,7 +170,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: Colors.black54,
                 child: Row(
                   children: [
-                    // 分组列表（占左侧）
                     Expanded(
                       flex: (subWeight * 10).toInt(),
                       child: GroupList(
@@ -149,7 +184,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
-                    // 频道列表（占右侧）
                     Expanded(
                       flex: (channelWeight * 10).toInt(),
                       child: ChannelList(
@@ -178,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          // 信息弹窗触发（点击屏幕下半部分）
+          // 信息弹窗触发
           Positioned(
             bottom: 0,
             left: 0,
