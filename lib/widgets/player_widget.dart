@@ -1,8 +1,10 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../services/log_service.dart';
+import '../services/settings_service.dart';
 
 class PlayerWidget extends StatefulWidget {
   final String url;
@@ -27,6 +29,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   bool isReconnecting = false;
   bool _isInitialized = false;
   String _currentUrl = '';
+  int _currentDecoder = 0;
 
   @override
   void initState() {
@@ -36,13 +39,23 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _initPlayer() {
     try {
-      // 使用默认配置（自动硬件解码）
-      player = Player();
+      // 从设置中读取解码器偏好
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      final decoder = settings.decoderIndex;
+      _currentDecoder = decoder;
+
+      // 配置播放器参数：增大缓冲，减少卡顿
+      final config = PlayerConfiguration(
+        bufferDuration: Duration(milliseconds: 5000), // 缓冲5秒
+        bufferSize: 8192,
+      );
+
+      player = Player(configuration: config);
       controller = VideoController(player);
       _isInitialized = true;
       _currentUrl = widget.url;
       _play(widget.url);
-      LogService.write('Player 初始化成功');
+      LogService.write('Player 初始化成功，解码器模式: $decoder');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
       Future.delayed(Duration(seconds: 2), () {
@@ -100,11 +113,27 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 检查解码器是否变化
+    final settings = Provider.of<SettingsService>(context, listen: false);
+    if (settings.decoderIndex != _currentDecoder) {
+      LogService.write('解码器变更，重启播放器');
+      _currentDecoder = settings.decoderIndex;
+      _recreatePlayer();
+      return;
+    }
     if (oldWidget.url != widget.url && _isInitialized) {
       _currentUrl = widget.url;
       LogService.write('切换频道: ${widget.url}');
       player.open(Media(widget.url));
     }
+  }
+
+  void _recreatePlayer() {
+    if (_isInitialized) {
+      player.dispose();
+    }
+    _isInitialized = false;
+    _initPlayer();
   }
 
   @override
