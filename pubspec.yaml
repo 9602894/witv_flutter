@@ -9,9 +9,11 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # 播放器核心
   media_kit: 1.1.10
   media_kit_video: 1.2.4
   media_kit_native_event_loop: ^1.0.8
+  media_kit_libs_android_video: 1.0.0   # 官方 Android 库，提供 libmpv.so
 
   dio: ^5.4.0
   xml: ^6.5.0
@@ -44,3 +46,4 @@ flutter_launcher_icons:
 dependency_overrides:
   media_kit: 1.1.10
   media_kit_video: 1.2.4
+  media_kit_libs_android_video: 1.0.0
