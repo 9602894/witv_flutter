@@ -36,6 +36,10 @@ class _HomeScreenState extends State<HomeScreen> {
   double groupWeight = 0.20;
   double channelWeight = 0.60;
 
+  // 节目单左右宽度权重
+  double scheduleLeftWeight = 0.35;
+  double scheduleRightWeight = 0.65;
+
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
   bool isLoading = true;
@@ -98,7 +102,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // 主覆盖层
+            // 主覆盖层（非节目单模式）
             if (!isScheduleMode)
               Positioned.fill(
                 child: Container(
@@ -160,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         flex: (channelWeight * 100).toInt(),
                         child: Column(
                           children: [
-                            // 频道列表上方：节目单按钮
+                            // 节目单按钮
                             Container(
                               color: Colors.transparent,
                               padding: EdgeInsets.symmetric(vertical: 4),
@@ -220,13 +224,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 节目单模式（覆盖频道列表，左侧有返回按钮）
+            // 节目单模式（覆盖频道列表，带返回按钮）
             if (isScheduleMode)
               Positioned.fill(
                 child: Container(
                   color: Colors.transparent,
                   child: Stack(
                     children: [
+                      // 节目单视图
                       ScheduleView(
                         channels: channels,
                         selectedChannel: currentChannel,
@@ -237,8 +242,17 @@ class _HomeScreenState extends State<HomeScreen> {
                           Provider.of<SettingsService>(context, listen: false)
                               .saveLastChannel(ch.name);
                         }),
+                        leftWeight: scheduleLeftWeight,
+                        rightWeight: scheduleRightWeight,
+                        onLeftWeightChanged: (newLeft) {
+                          setState(() {
+                            scheduleLeftWeight = newLeft.clamp(0.1, 0.9);
+                            scheduleRightWeight = 1 - scheduleLeftWeight;
+                          });
+                        },
+                        isEditMode: isEditMode,
                       ),
-                      // 左上角返回按钮（关闭节目单）
+                      // 左上角返回按钮
                       Positioned(
                         top: 8,
                         left: 8,
@@ -268,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 右侧菜单
+            // 右侧菜单（返回键）
             if (_showRightMenu)
               Positioned(
                 top: 0,
@@ -382,6 +396,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text('分组 ${(groupWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
                       SizedBox(width: 16),
                       Text('频道 ${(channelWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      if (isScheduleMode) ...[
+                        SizedBox(width: 16),
+                        Text('节目单左 ${(scheduleLeftWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
                       SizedBox(width: 16),
                       ElevatedButton(
                         onPressed: () => setState(() => isEditMode = false),
@@ -467,7 +485,6 @@ class _HomeScreenState extends State<HomeScreen> {
         itemBuilder: (context, index) {
           final group = groups[index];
           final isSelected = group == currentGroup;
-          // 不显示分组名称中的逗号
           final displayName = group.replaceAll(',', '');
           return ListTile(
             title: Text(
@@ -749,7 +766,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final url = sub.url;
       LogService.write('订阅源 URL: $url');
 
-      // 从缓存或网络加载
       final cacheFile = await PlaylistParser.getCacheFile(url, sub.name);
       Map<String, List<Channel>> groupMap;
       if (await cacheFile.exists()) {
