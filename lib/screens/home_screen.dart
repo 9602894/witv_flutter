@@ -31,10 +31,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isEditMode = false;
   bool _showRightMenu = false;
 
-  // 三个窗口的宽度权重（总和为1）
+  // 主界面三个窗口权重
   double subWeight = 0.15;
   double groupWeight = 0.20;
   double channelWeight = 0.65;
+
+  // 节目单左右窗口权重
+  double scheduleLeftWeight = 0.35;
+  double scheduleRightWeight = 0.65;
 
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
@@ -52,35 +56,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        if (_showRightMenu) {
-          setState(() => _showRightMenu = false);
-          return false;
-        }
-        if (showOverlay) {
-          setState(() => showOverlay = false);
-          return false;
-        }
-        final shouldExit = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: Text('提示'),
-            content: Text('确定要退出应用吗？'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text('取消'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text('确定'),
-              ),
-            ],
-          ),
-        );
-        if (shouldExit == true) {
-          exit(0);
-        }
-        return false;
+        // 按返回键：切换右侧菜单显示状态，不退出
+        setState(() {
+          _showRightMenu = !_showRightMenu;
+          // 如果显示菜单，隐藏覆盖层（可选）
+          if (_showRightMenu) showOverlay = false;
+        });
+        return false; // 阻止退出
       },
       child: Scaffold(
         body: Stack(
@@ -93,19 +75,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // 主覆盖层（订阅列表 + 分组 + 频道）
+            // 主覆盖层（透明背景）
             if (showOverlay && !isScheduleMode)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black54,
+                  color: Colors.transparent, // 完全透明
                   child: Row(
                     children: [
-                      // 订阅列表（左侧）
+                      // 订阅列表
                       Expanded(
                         flex: (subWeight * 100).toInt(),
                         child: _buildSubscriptionList(),
                       ),
-                      // 拖拽分隔条1（订阅 ↔ 分组）
                       _buildDragBar(
                         onDrag: (delta) {
                           setState(() {
@@ -126,7 +107,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
-                      // 分组列表
                       Expanded(
                         flex: (groupWeight * 100).toInt(),
                         child: GroupList(
@@ -140,7 +120,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                         ),
                       ),
-                      // 拖拽分隔条2（分组 ↔ 频道）
                       _buildDragBar(
                         onDrag: (delta) {
                           setState(() {
@@ -161,7 +140,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
-                      // 频道列表
                       Expanded(
                         flex: (channelWeight * 100).toInt(),
                         child: ChannelList(
@@ -181,29 +159,38 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 节目单模式
+            // 节目单模式（透明背景，可编辑宽度）
             if (isScheduleMode)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black87,
+                  color: Colors.transparent,
                   child: ScheduleView(
                     channels: channels,
                     selectedChannel: currentChannel,
                     epgMap: epgMap,
                     onSelectChannel: (ch) => setState(() => currentChannel = ch),
+                    leftWeight: scheduleLeftWeight,
+                    rightWeight: scheduleRightWeight,
+                    onLeftWeightChanged: (newLeft) {
+                      setState(() {
+                        scheduleLeftWeight = newLeft.clamp(0.1, 0.9);
+                        scheduleRightWeight = 1 - scheduleLeftWeight;
+                      });
+                    },
+                    isEditMode: isEditMode,
                   ),
                 ),
               ),
 
-            // 右侧菜单（返回键弹出，宽度10%）
+            // 右侧菜单（返回键弹出）
             if (_showRightMenu)
               Positioned(
                 top: 0,
                 right: 0,
                 bottom: 0,
-                width: MediaQuery.of(context).size.width * 0.1,
+                width: MediaQuery.of(context).size.width * 0.12,
                 child: Container(
-                  color: Colors.black.withOpacity(0.85),
+                  color: Colors.black.withOpacity(0.7),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -212,6 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           context,
                           MaterialPageRoute(builder: (_) => SettingsScreen()),
                         ).then((_) => setState(() {}));
+                        setState(() => _showRightMenu = false);
                       }),
                       _buildMenuItem(Icons.edit, '编辑', () {
                         setState(() {
@@ -227,9 +215,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       }),
                       _buildMenuItem(Icons.list, '列表订阅', () {
                         _showAddSubscriptionDialog();
+                        setState(() => _showRightMenu = false);
                       }),
                       _buildMenuItem(Icons.tv, 'EPG订阅', () {
                         _showAddEpgDialog();
+                        setState(() => _showRightMenu = false);
                       }),
                       _buildMenuItem(Icons.close, '关闭', () {
                         setState(() => _showRightMenu = false);
@@ -239,24 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // 信息弹窗触发区（点击屏幕下半部分显示当前频道信息）
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: 100,
-              child: GestureDetector(
-                onTap: () {
-                  if (currentChannel != null) {
-                    final programs = EpgParser.getProgramsForChannel(currentChannel!.name);
-                    showInfoPopup(context, currentChannel!, programs, currentSpeed);
-                  }
-                },
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-
-            // 顶部工具栏（设置、编辑、节目单快捷按钮）
+            // 顶部工具栏（快捷按钮）
             Positioned(
               top: 0,
               right: 0,
@@ -286,14 +259,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // 编辑模式信息显示（当前各窗口宽度百分比）
+            // 编辑模式信息
             if (isEditMode)
               Positioned(
                 top: 50,
                 left: 0,
                 right: 0,
                 child: Container(
-                  color: Colors.black.withOpacity(0.7),
+                  color: Colors.black.withOpacity(0.6),
                   padding: EdgeInsets.symmetric(vertical: 4),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -303,6 +276,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text('分组 ${(groupWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
                       SizedBox(width: 16),
                       Text('频道 ${(channelWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      if (isScheduleMode) ...[
+                        SizedBox(width: 16),
+                        Text('节目单左 ${(scheduleLeftWeight*100).toInt()}%', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
                       SizedBox(width: 16),
                       ElevatedButton(
                         onPressed: () => setState(() => isEditMode = false),
@@ -334,20 +311,17 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 订阅列表（左侧） ==========
+  // 订阅列表
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
     if (subs.isEmpty) {
       return Center(
-        child: Text(
-          '无订阅',
-          style: TextStyle(color: Colors.white70, fontSize: 12),
-        ),
+        child: Text('无订阅', style: TextStyle(color: Colors.white70, fontSize: 12)),
       );
     }
     return Container(
-      color: Colors.black45,
+      color: Colors.transparent,
       child: ListView.builder(
         itemCount: subs.length,
         itemBuilder: (context, index) {
@@ -356,10 +330,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return ListTile(
             title: Text(
               sub.name,
-              style: TextStyle(
-                color: isSelected ? Colors.yellow : Colors.white,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: isSelected ? Colors.yellow : Colors.white, fontSize: 12),
             ),
             onTap: () {
               settings.toggleSelected(sub);
@@ -371,7 +342,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 拖拽分隔条 ==========
+  // 拖拽条
   Widget _buildDragBar({required Function(double delta) onDrag, required bool isEditMode}) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -386,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 右侧菜单项 ==========
+  // 菜单项
   Widget _buildMenuItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -397,17 +368,14 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(icon, color: Colors.white, size: 24),
             SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(color: Colors.white, fontSize: 10),
-            ),
+            Text(label, style: TextStyle(color: Colors.white, fontSize: 10)),
           ],
         ),
       ),
     );
   }
 
-  // ========== 列表订阅对话框 ==========
+  // 列表订阅对话框
   void _showAddSubscriptionDialog() {
     final nameCtrl = TextEditingController();
     final urlCtrl = TextEditingController();
@@ -418,11 +386,8 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: '名称（如：5c直播）')),
-            SizedBox(height: 8),
-            TextField(controller: urlCtrl, decoration: InputDecoration(labelText: 'URL（如：http://xxx.m3u）')),
-            SizedBox(height: 8),
-            Text('提示：添加后自动选中，返回主页生效', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: '名称')),
+            TextField(controller: urlCtrl, decoration: InputDecoration(labelText: 'URL')),
           ],
         ),
         actions: [
@@ -437,8 +402,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 _reloadData();
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已添加订阅: $name')));
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('名称和URL都不能为空')));
               }
             },
             child: Text('添加'),
@@ -448,40 +411,29 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== EPG订阅对话框 ==========
+  // EPG订阅对话框
   void _showAddEpgDialog() {
     final ctrl = TextEditingController();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: Text('添加EPG订阅'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: ctrl, decoration: InputDecoration(labelText: 'EPG URL（XMLTV格式）')),
-            SizedBox(height: 8),
-            Text('提示：添加后自动刷新EPG', style: TextStyle(fontSize: 12, color: Colors.grey)),
-          ],
-        ),
+        content: TextField(controller: ctrl, decoration: InputDecoration(labelText: 'EPG URL (XMLTV)')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
           TextButton(
             onPressed: () async {
               final url = ctrl.text.trim();
               if (url.isNotEmpty) {
-                // 保存到配置文件
                 final config = await ConfigService.getConfig();
                 final inner = config['Configuration'] as Map<String, dynamic>?;
                 if (inner != null) {
                   inner['EPG_URLS'] = url;
                   await ConfigService.saveConfig({'Configuration': inner});
-                  // 重新加载EPG
                   _loadEpgInBackground();
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('EPG已更新')));
                 }
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('URL不能为空')));
               }
             },
             child: Text('添加'),
@@ -491,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 数据加载方法 ==========
+  // ===== 数据加载（与之前相同） =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
@@ -507,9 +459,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadEpgInBackground();
   }
 
-  Future<void> _loadSavedSubscriptions() async {
-    await Future.delayed(Duration.zero);
-  }
+  Future<void> _loadSavedSubscriptions() async => Future.delayed(Duration.zero);
 
   Future<void> _addDefaultSubscription() async {
     try {
@@ -528,8 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
         final settings = Provider.of<SettingsService>(context, listen: false);
-        final sub = Subscription(name: name, url: url, selected: true);
-        settings.addSubscription(sub);
+        settings.addSubscription(Subscription(name: name, url: url, selected: true));
         LogService.write('自动添加默认订阅源: $name -> $url');
       }
     } catch (e, stack) {
@@ -636,9 +585,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (groups.isNotEmpty) {
           currentGroup = groups.first;
           channels = groupMap[currentGroup]!;
-          if (channels.isNotEmpty) {
-            currentChannel = channels.first;
-          }
+          if (channels.isNotEmpty) currentChannel = channels.first;
         }
       });
       LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
