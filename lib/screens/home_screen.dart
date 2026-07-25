@@ -125,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final config = await ConfigService.getConfig();
       final inner = config['Configuration'] as Map<String, dynamic>?;
       
-      // 处理 EPG URL：剥离 $ 及后面的名称
+      // ★ 修正：剥离 EPG URL 中的 $ 及后面的名称
       final epgUrlRaw = inner?['EPG_URLS'] as String?;
       if (epgUrlRaw != null && epgUrlRaw.isNotEmpty) {
         String epgUrl = epgUrlRaw;
