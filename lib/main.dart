@@ -9,18 +9,18 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  LogService.write('应用启动极简模式');
+  // 同步初始化 media_kit，确保播放器使用前完成
+  try {
+    MediaKit.ensureInitialized();
+    await LogService.write('MediaKit 初始化成功');
+  } catch (e, stack) {
+    await LogService.writeCrashLog(e, stack);
+    // 如果初始化失败，显示错误界面或退出
+    // 这里简单记录，但播放器会无法工作，所以可能需要重新抛出
+    // 我们可以显示一个错误页面，但先继续
+  }
 
-  // 初始化 MediaKit（异步不阻塞）
-  Future.microtask(() {
-    try {
-      MediaKit.ensureInitialized();
-      LogService.write('MediaKit 初始化成功');
-    } catch (e, stack) {
-      LogService.writeCrashLog(e, stack);
-    }
-  });
-
+  // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
     LogService.writeCrashLog(details.exception, details.stack);
