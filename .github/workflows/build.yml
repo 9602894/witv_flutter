@@ -58,33 +58,29 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 🔧 精确修补 screen_brightness_android 插件
-      - name: Patch screen_brightness_android
+      # 🔧 修补 screen_brightness_android 插件的 Kotlin 源码
+      - name: Patch screen_brightness_android source
         run: |
-          # 定位主插件的 android/build.gradle.kts（排除 example、test、sample 等）
-          PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/screen_brightness_android*/android/build.gradle.kts" ! -path "*/example/*" ! -path "*/test/*" ! -path "*/sample/*" | head -n 1)
+          # 定位插件的 Kotlin 源文件
+          PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/screen_brightness_android*/android/src/main/kotlin/**/ScreenBrightnessAndroidPlugin.kt" | head -n 1)
           if [ -z "$PLUGIN_FILE" ]; then
-            echo "❌ 未找到主构建文件"
+            echo "❌ 未找到 ScreenBrightnessAndroidPlugin.kt"
             exit 1
           fi
-          echo "📄 找到文件: $PLUGIN_FILE"
+          echo "📄 找到源文件: $PLUGIN_FILE"
           
-          # 修复 jvmTarget 赋值错误
-          sed -i 's/jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8/jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)/' "$PLUGIN_FILE"
+          # 备份原文件
+          cp "$PLUGIN_FILE" "$PLUGIN_FILE.bak"
           
-          # 如果存在 compilerOptions 块（第74行），将其删除或替换为 kotlinOptions
-          # 这里我们直接删除整个 compilerOptions { ... } 块（包括大括号内容）
-          perl -0777 -i -pe 's/\s*compilerOptions\s*\{[^}]*\}//g' "$PLUGIN_FILE"
+          # 将 .toUri() 替换为 Uri.parse()
+          sed -i 's/\.toUri()/Uri.parse()/g' "$PLUGIN_FILE"
           
-          # 验证修复
-          if grep -q "jvmTarget = " "$PLUGIN_FILE"; then
-            echo "❌ jvmTarget 修复失败"
-            exit 1
+          # 确保导入 android.net.Uri（如果不存在则添加）
+          if ! grep -q "import android.net.Uri" "$PLUGIN_FILE"; then
+            # 在文件开头添加 import
+            sed -i '1i import android.net.Uri' "$PLUGIN_FILE"
           fi
-          if grep -q "compilerOptions" "$PLUGIN_FILE"; then
-            echo "❌ compilerOptions 未删除"
-            exit 1
-          fi
+          
           echo "✅ 修补完成"
 
       - name: Build Android APK (release)
