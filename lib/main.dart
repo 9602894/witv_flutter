@@ -9,7 +9,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
 
-  // 同步初始化 media_kit，确保在播放器使用前完成
+  // 同步初始化 media_kit（必须在使用前完成）
   try {
     MediaKit.ensureInitialized();
     await LogService.write('MediaKit 初始化成功');
