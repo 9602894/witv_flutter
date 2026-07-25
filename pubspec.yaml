@@ -11,7 +11,7 @@ dependencies:
 
   # 播放器核心
   media_kit: ^1.1.10
-  media_kit_video: ^1.2.4    # 固定版本
+  media_kit_video: ^1.2.4   # 降级以兼容 Flutter 3.22
   media_kit_native_event_loop: ^1.0.8
 
   dio: ^5.4.0
@@ -33,6 +33,5 @@ flutter:
     - assets/configuration.json
     - assets/epg_data.json
 
-# 锁定 media_kit_video 版本，避免兼容性问题
 dependency_overrides:
-  media_kit_video: 1.2.4
+  media_kit_video: 1.2.4   # 强制锁定
