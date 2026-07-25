@@ -46,7 +46,6 @@ class EpgParser {
       final hashFile = File('${dir.path}/epg_hash.txt');
 
       bool needDownload = true;
-      // 使用 Dio 并设置超时
       final dio = Dio(BaseOptions(connectTimeout: Duration(seconds: 10), receiveTimeout: Duration(seconds: 15)));
       try {
         final hashUrl = '$url.hash';
@@ -67,13 +66,11 @@ class EpgParser {
         }
       } catch (e) {
         await LogService.write('获取哈希失败，直接下载: $e');
-        // 直接下载
         final response = await dio.get(url);
         await cacheFile.writeAsString(response.data as String);
         await LogService.write('EPG下载完成（无哈希）');
       }
 
-      // 解析 XML
       final xmlString = await cacheFile.readAsString();
       final document = XmlDocument.parse(xmlString);
       final allPrograms = <String, List<EpgProgram>>{};
