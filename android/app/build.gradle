@@ -56,7 +56,7 @@ android {
         }
     }
 
-    // 确保 native 库被包含
+    // 解决多个 so 文件冲突
     packagingOptions {
         pickFirst '**/*.so'
     }
