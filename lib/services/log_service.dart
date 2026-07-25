@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart'; // 可选，如需分享功能
 
 class LogService {
   static final LogService _instance = LogService._internal();
@@ -15,8 +16,9 @@ class LogService {
     _logFile = File('${dir.path}/$logFileName');
     if (await _logFile!.exists()) {
       final size = await _logFile!.length();
-      if (size > 1024 * 1024) {
-        await _logFile!.writeAsString('', flush: true);
+      if (size > 1024 * 1024) { // 超过1MB滚动
+        await _logFile!.rename('${dir.path}/witv_log_${DateTime.now().millisecondsSinceEpoch}.txt');
+        _logFile = File('${dir.path}/$logFileName');
       }
     }
     await write('=== 日志系统初始化 ===');
@@ -30,8 +32,14 @@ class LogService {
     try {
       await _logFile!.writeAsString(line, mode: FileMode.append);
     } catch (e) {
-      print('写入日志失败: $e');
+      // 避免递归
     }
+  }
+
+  /// 写入崩溃日志（包含堆栈）
+  static Future<void> writeCrashLog(dynamic error, dynamic stack) async {
+    final message = 'CRASH: $error\nStack: $stack';
+    await write(message);
   }
 
   /// 读取完整日志
@@ -48,11 +56,12 @@ class LogService {
     await write('日志已清空');
   }
 
-  /// 导出日志到文件（用于分享或保存）
+  /// 导出日志到外部存储（用于分享或保存）
   static Future<File> export() async {
     if (_logFile == null) await init();
-    final dir = await getApplicationDocumentsDirectory();
-    final exportFile = File('${dir.path}/witv_log_${DateTime.now().millisecondsSinceEpoch}.txt');
+    final dir = await getExternalStorageDirectory();
+    final exportDir = dir ?? await getApplicationDocumentsDirectory();
+    final exportFile = File('${exportDir.path}/witv_log_${DateTime.now().millisecondsSinceEpoch}.txt');
     final content = await read();
     await exportFile.writeAsString(content);
     return exportFile;
