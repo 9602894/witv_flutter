@@ -62,24 +62,7 @@ jobs:
       - name: Remove problematic plugins
         run: rm -rf $HOME/.pub-cache/hosted/pub.dev/screen_brightness_android-*
 
-      # 复制应用图标到各个 mipmap 目录
-      - name: Copy app icon
-        run: |
-          mkdir -p android/app/src/main/res/mipmap-hdpi
-          mkdir -p android/app/src/main/res/mipmap-mdpi
-          mkdir -p android/app/src/main/res/mipmap-xhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
-          if [ -f "ico/ic_launcher.png" ]; then
-            cp ico/ic_launcher.png android/app/src/main/res/mipmap-hdpi/
-            cp ico/ic_launcher.png android/app/src/main/res/mipmap-mdpi/
-            cp ico/ic_launcher.png android/app/src/main/res/mipmap-xhdpi/
-            cp ico/ic_launcher.png android/app/src/main/res/mipmap-xxhdpi/
-            cp ico/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/
-            echo "✅ 图标已复制"
-          else
-            echo "⚠️ 未找到图标文件，跳过"
-          fi
+      # 不再复制图标，使用系统默认图标
 
       - name: Build Android APK (release)
         run: flutter build apk --release
