@@ -27,9 +27,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   String _currentUrl = '';
   Timer? _bufferTimer;
   double _speed = 0;
-  Timer? _reconnectTimer;
   bool _isReconnecting = false;
-  int _reconnectAttempts = 0;
+  Timer? _reconnectTimer;
 
   @override
   void initState() {
@@ -40,22 +39,22 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _initPlayer(String url) {
     _currentUrl = url;
     _controller?.dispose();
+    _isReconnecting = false;
+    _reconnectTimer?.cancel();
+
     _controller = VideoPlayerController.network(url)
       ..initialize().then((_) {
         setState(() {
           _isInitialized = true;
+          _isReconnecting = false;
         });
         _controller!.play();
         LogService.write('视频初始化成功: $url');
-        // 重置重连计数
-        _reconnectAttempts = 0;
-        _isReconnecting = false;
-        _reconnectTimer?.cancel();
         // 模拟网速
         _bufferTimer?.cancel();
         _bufferTimer = Timer.periodic(Duration(seconds: 1), (timer) {
           if (_controller != null && _controller!.value.buffered.isNotEmpty) {
-            // 近似网速模拟
+            // 模拟网速 0.5~5.5 M/s
             double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
             widget.onSpeedUpdate(simulatedSpeed);
           }
@@ -63,41 +62,26 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       }).catchError((e) {
         LogService.write('视频初始化失败: $e');
         widget.onError();
-        // 检查自动重连设置
+        // 检查是否开启重连
         final settings = Provider.of<SettingsService>(context, listen: false);
-        if (settings.autoReconnect) {
-          _startReconnect();
+        if (settings.autoReconnect && !_isReconnecting) {
+          _attemptReconnect();
         }
       });
   }
 
-  void _startReconnect() {
+  void _attemptReconnect() {
     if (_isReconnecting) return;
     _isReconnecting = true;
-    _reconnectAttempts++;
-    LogService.write('开始重连，第 $_reconnectAttempts 次');
+    LogService.write('尝试重连 (1秒后)');
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
+    _reconnectTimer = Timer(Duration(seconds: 1), () {
+      if (mounted && !_isInitialized) {
+        LogService.write('重连中: $_currentUrl');
+        _initPlayer(_currentUrl);
+      } else {
+        _isReconnecting = false;
       }
-      // 尝试重新初始化
-      _controller?.dispose();
-      _controller = VideoPlayerController.network(_currentUrl)
-        ..initialize().then((_) {
-          timer.cancel();
-          _isReconnecting = false;
-          setState(() {
-            _isInitialized = true;
-          });
-          _controller!.play();
-          LogService.write('重连成功');
-          _reconnectAttempts = 0;
-        }).catchError((e) {
-          LogService.write('重连失败: $e');
-          // 继续等待下一次尝试
-        });
     });
   }
 
@@ -105,9 +89,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
-      _reconnectTimer?.cancel();
       _isReconnecting = false;
-      _reconnectAttempts = 0;
+      _reconnectTimer?.cancel();
       _initPlayer(widget.url);
     }
   }
@@ -117,7 +100,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized || _controller == null) {
       return Container(
         color: Colors.black,
-        child: Center(child: CircularProgressIndicator()),
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          ),
+        ),
       );
     }
     return Stack(
