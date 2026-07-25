@@ -57,14 +57,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: EdgeInsets.all(16),
         children: [
-          // 配置项
           ..._buildConfigWidgets(),
           Divider(),
-          // 解码器选择
           Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ListTile(
             title: Text('解码方式'),
-            subtitle: Text(['自动', '硬解', '软解'][settings.decoderIndex]),
+            subtitle: Text(['自动（推荐）', '硬件解码', '软件解码'][settings.decoderIndex]),
             trailing: IconButton(
               icon: Icon(Icons.arrow_forward_ios),
               onPressed: () => _showDecoderDialog(context),
@@ -151,7 +149,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // 以下方法保持不变
   Future<void> _saveConfig() async {
     if (config != null) {
       final full = {'Configuration': config};
