@@ -41,21 +41,23 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         });
         _controller!.play();
         LogService.write('视频初始化成功: $url');
-        // 监听缓冲进度
-        _controller!.addListener(() {
-          if (_controller!.value.buffered.isNotEmpty) {
+        // 模拟网速（近似）
+        _bufferTimer?.cancel();
+        _bufferTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+          if (_controller != null && _controller!.value.buffered.isNotEmpty) {
             final buffered = _controller!.value.buffered.last.end.inMilliseconds;
             final duration = _controller!.value.duration.inMilliseconds;
             if (duration > 0) {
-              final speed = buffered / duration; // 缓冲百分比，非网速
-              // 近似网速 = buffered 字节/时间，但无法精确，我们忽略
+              // 计算缓冲百分比，当作"速度"展示（非精确网速）
+              final speed = (buffered / duration) * 100;
+              widget.onSpeedUpdate(speed);
             }
           }
         });
       }).catchError((e) {
         LogService.write('视频初始化失败: $e');
         widget.onError();
-        // 尝试重连
+        // 自动重试
         Future.delayed(Duration(seconds: 3), () {
           if (mounted && _controller != null && !_controller!.value.isInitialized) {
             _initPlayer(url);
