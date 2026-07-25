@@ -9,7 +9,12 @@ class PlayerWidget extends StatefulWidget {
   final VoidCallback onError;
   final Function(double speed) onSpeedUpdate;
 
-  const PlayerWidget({Key? key, required this.url, required this.onError, required this.onSpeedUpdate}) : super(key: key);
+  const PlayerWidget({
+    Key? key,
+    required this.url,
+    required this.onError,
+    required this.onSpeedUpdate,
+  }) : super(key: key);
 
   @override
   _PlayerWidgetState createState() => _PlayerWidgetState();
@@ -37,7 +42,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       LogService.write('Player 初始化成功');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      // 延迟重试
       Future.delayed(Duration(seconds: 2), () {
         if (mounted && !_isInitialized) {
           LogService.write('重试初始化 Player');
@@ -85,6 +89,16 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         LogService.write('重连成功');
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(PlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 如果 URL 变化且当前已经初始化，则重新播放
+    if (oldWidget.url != widget.url && _isInitialized) {
+      LogService.write('URL 变化，重新播放: ${widget.url}');
+      player.open(Media(widget.url));
+    }
   }
 
   @override
