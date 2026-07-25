@@ -1,4 +1,3 @@
-// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
@@ -13,6 +12,7 @@ import '../widgets/group_list.dart';
 import '../widgets/schedule_view.dart';
 import '../widgets/info_popup.dart';
 import '../widgets/edit_toolbar.dart';
+import 'settings_screen.dart';  // 添加这行
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -124,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (currentChannel != null)
             PlayerWidget(
               url: currentChannel!.url,
-              onError: (e) => print('播放错误: $e'),
+              onError: () => print('播放错误'),  // 改为无参回调
               onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
             ),
           // 叠加层（频道列表等）
