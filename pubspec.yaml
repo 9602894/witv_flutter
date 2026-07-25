@@ -9,21 +9,21 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 播放器
+  # 播放器核心
   media_kit: ^1.1.10
   media_kit_video: ^1.2.4
   media_kit_native_event_loop: ^1.0.8
 
-  # 网络
+  # 网络请求
   dio: ^5.4.0
 
   # XML 解析
   xml: ^6.5.0
 
-  # JSON
+  # JSON 序列化
   json_annotation: ^4.8.1
 
-  # 存储
+  # 本地存储
   shared_preferences: ^2.2.2
 
   # 状态管理
@@ -32,8 +32,11 @@ dependencies:
   # 文件路径
   path_provider: ^2.1.2
 
-  # SVG
+  # SVG 图标（可选）
   flutter_svg: ^2.0.9
+
+  # 屏幕亮度调节（如果不需要，可删除此行）
+  screen_brightness: 2.0.0   # 锁定主包版本
 
 dev_dependencies:
   flutter_test:
@@ -45,3 +48,7 @@ flutter:
   assets:
     - assets/configuration.json
     - assets/epg_data.json
+
+# 强制使用修复后的 android 实现版本
+dependency_overrides:
+  screen_brightness_android: 2.1.6   # 修复了 jvmTarget 语法错误
