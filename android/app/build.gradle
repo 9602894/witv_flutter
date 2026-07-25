@@ -56,14 +56,12 @@ android {
         }
     }
 
-    // 解决多个 so 文件冲突，并确保 libmpv.so 被打包
+    // 关键：解决 so 库冲突，确保 libmpv.so 被包含
     packagingOptions {
         pickFirst '**/*.so'
-        // 如果还有重复，可以添加 excludes 或 pickFirst
     }
 
-    // 配置 ABI 过滤，确保包含所有架构（默认会包含所有）
-    // 如果需要减少 APK 大小，可以只保留 arm64-v8a 和 armeabi-v7a
+    // 包含所有常见 ABI（确保 libmpv.so 对当前设备可用）
     splits {
         abi {
             enable false
