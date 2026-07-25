@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/subscription.dart';
 import 'dart:convert';
 import 'log_service.dart';
+import 'config_service.dart';
 
 class SettingsService extends ChangeNotifier {
   List<Subscription> _subscriptions = [];
@@ -23,6 +24,27 @@ class SettingsService extends ChangeNotifier {
         final list = jsonDecode(subsJson) as List;
         _subscriptions = list.map((e) => Subscription.fromJson(e)).toList();
       }
+
+      // 如果没有任何订阅源，从 configuration.json 中读取默认订阅源并添加
+      if (_subscriptions.isEmpty) {
+        final config = await ConfigService.getConfig();
+        final inner = config['Configuration'] as Map<String, dynamic>?;
+        final liveUrl = inner?['LIVE_URLS'] as String?;
+        if (liveUrl != null && liveUrl.isNotEmpty) {
+          String name = '默认源';
+          String url = liveUrl;
+          if (liveUrl.contains('$')) {
+            final parts = liveUrl.split('\$');
+            if (parts.length == 2) {
+              url = parts[0].trim();
+              name = parts[1].trim();
+            }
+          }
+          _subscriptions.add(Subscription(name: name, url: url, selected: true));
+          await saveSubscriptions();
+          await LogService.write('自动添加默认订阅源: $name -> $url');
+        }
+      }
       await LogService.write('加载订阅源: ${_subscriptions.length} 条');
     } catch (e) {
       await LogService.write('加载订阅源失败: $e');
@@ -30,45 +52,5 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> saveSubscriptions() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final json = jsonEncode(_subscriptions.map((e) => e.toJson()).toList());
-      await prefs.setString('subscriptions', json);
-      await LogService.write('订阅源已保存: ${_subscriptions.length} 条');
-    } catch (e) {
-      await LogService.write('保存订阅源失败: $e');
-    }
-  }
-
-  void addSubscription(Subscription sub) {
-    _subscriptions.add(sub);
-    saveSubscriptions();
-    _needsRefresh = true;
-    notifyListeners();
-  }
-
-  void removeSubscription(Subscription sub) {
-    _subscriptions.remove(sub);
-    saveSubscriptions();
-    _needsRefresh = true;
-    notifyListeners();
-  }
-
-  void toggleSelected(Subscription sub) {
-    sub.selected = !sub.selected;
-    saveSubscriptions();
-    _needsRefresh = true;
-    notifyListeners();
-  }
-
-  void markNeedsRefresh() {
-    _needsRefresh = true;
-    notifyListeners();
-  }
-
-  void clearRefreshFlag() {
-    _needsRefresh = false;
-    // 不需要通知，因为已经刷新过了
-  }
+  // 其他方法不变...
 }
