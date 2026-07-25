@@ -39,7 +39,6 @@ class _HomeScreenState extends State<HomeScreen> {
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
-  String? _errorMessage;
 
   @override
   void initState() {
@@ -69,20 +68,20 @@ class _HomeScreenState extends State<HomeScreen> {
       _checkSubscriptions();
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      setState(() {
-        _errorMessage = '初始化失败: $e';
-      });
     } finally {
-      setState(() {
-        isLoading = false;
-      });
+      // 确保无论成功与否，都退出加载状态
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
     LogService.write('主页初始化完成');
     _loadEpgInBackground();
   }
 
   Future<void> _loadSavedSubscriptions() async {
-    // 已由 SettingsService 加载
+    // 由 SettingsService 负责
     await Future.delayed(Duration.zero);
   }
 
@@ -131,9 +130,11 @@ class _HomeScreenState extends State<HomeScreen> {
             return {};
           },
         );
-        setState(() {
-          epgMap = map;
-        });
+        if (mounted) {
+          setState(() {
+            epgMap = map;
+          });
+        }
         LogService.write('EPG加载成功，频道数: ${map.length}');
       } else {
         LogService.write('EPG URL为空，跳过');
@@ -153,13 +154,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _checkSubscriptions();
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      setState(() {
-        _errorMessage = '刷新失败: $e';
-      });
     } finally {
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -227,10 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
       LogService.write('订阅源加载成功，分组数: ${groups.length}，频道数: ${channels.length}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      // 不重新抛出，让界面显示错误信息
-      setState(() {
-        _errorMessage = '加载订阅源失败: $e';
-      });
+      rethrow;
     }
   }
 
@@ -264,32 +261,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (isLoading) {
       return Scaffold(
         body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_errorMessage != null) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error, size: 64, color: Colors.red),
-              SizedBox(height: 16),
-              Text('错误: $_errorMessage', style: TextStyle(color: Colors.white)),
-              SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _errorMessage = null;
-                    isLoading = true;
-                  });
-                  _init();
-                },
-                child: Text('重试'),
-              ),
-            ],
-          ),
-        ),
       );
     }
 
