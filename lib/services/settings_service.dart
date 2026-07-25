@@ -2,16 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/subscription.dart';
 import 'dart:convert';
+import 'dart:io';
+import 'path_provider.dart' as path_provider;
 import 'log_service.dart';
 
 class SettingsService extends ChangeNotifier {
   List<Subscription> _subscriptions = [];
   bool _needsRefresh = false;
-  int _decoderIndex = 0; // 0=系统解码，1=IJK硬解，2=IJK软解，3=EXO硬解，4=EXO软解，5=MPV硬解，6=MPV软解
+  int _decoderIndex = 0;
+  String? _lastChannel;
 
   List<Subscription> get subscriptions => _subscriptions;
   bool get needsRefresh => _needsRefresh;
   int get decoderIndex => _decoderIndex;
+  String? get lastChannel => _lastChannel;
 
   SettingsService() {
     _load();
@@ -26,6 +30,7 @@ class SettingsService extends ChangeNotifier {
         _subscriptions = list.map((e) => Subscription.fromJson(e)).toList();
       }
       _decoderIndex = prefs.getInt('decoder_index') ?? 0;
+      _lastChannel = prefs.getString('last_channel');
       await LogService.write('SettingsService: 加载订阅源 ${_subscriptions.length} 条，解码器索引 $_decoderIndex');
     } catch (e, stack) {
       await LogService.writeCrashLog(e, stack);
@@ -80,5 +85,24 @@ class SettingsService extends ChangeNotifier {
     await prefs.setInt('decoder_index', index);
     await LogService.write('解码器切换为: $index');
     notifyListeners();
+  }
+
+  void saveLastChannel(String channelName) async {
+    _lastChannel = channelName;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_channel', channelName);
+    await LogService.write('保存上次频道: $channelName');
+  }
+
+  String? getLastChannel() => _lastChannel;
+
+  // 获取订阅源缓存目录
+  static Future<Directory> getCacheDir() async {
+    final appDocDir = await path_provider.getApplicationDocumentsDirectory();
+    final cacheDir = Directory('${appDocDir.path}/playlist_cache');
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    return cacheDir;
   }
 }
