@@ -37,11 +37,23 @@ class _HomeScreenState extends State<HomeScreen> {
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    _init();
+    // 在 initState 中不加载，等到 didChangeDependencies
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initialized) {
+      _initialized = true;
+      _init();
+    }
+    // 监听 SettingsService 变化，当订阅列表变化时重新加载
+    Provider.of<SettingsService>(context, listen: true);
   }
 
   Future<void> _init() async {
@@ -117,6 +129,14 @@ class _HomeScreenState extends State<HomeScreen> {
             if (channels.isNotEmpty) currentChannel = channels.first;
           }
         });
+      } else {
+        // 无选中订阅，清空频道列表
+        setState(() {
+          channels = [];
+          groups = [];
+          currentChannel = null;
+          currentGroup = null;
+        });
       }
     } catch (e) {
       print('加载源失败: $e');
@@ -148,6 +168,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 监听 SettingsService 变化，并在变化时重新加载源（如果当前没有频道且已加载完成）
+    final settings = Provider.of<SettingsService>(context);
+    // 当订阅列表变化且页面已加载完成时，重新加载
+    // 但为了不频繁刷新，我们可以在订阅变化时设置一个标志，但简单起见，每次 build 时检查是否有选中订阅但频道为空
+    if (!isLoading && settings.subscriptions.any((s) => s.selected) && channels.isEmpty) {
+      // 延迟一帧执行，避免无限循环
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadInitialSource();
+      });
+    }
+
     if (isLoading) {
       return Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -157,14 +188,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // 播放器
           if (currentChannel != null)
             PlayerWidget(
               url: currentChannel!.url,
               onError: () => print('播放错误'),
               onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
             ),
-          // 叠加层（频道列表等）
           if (showOverlay && !isScheduleMode)
             Positioned.fill(
               child: Container(
@@ -200,7 +229,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          // 节目单模式
           if (isScheduleMode)
             Positioned.fill(
               child: Container(
@@ -213,7 +241,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          // 信息弹窗触发（点击屏幕下半部分）
           Positioned(
             bottom: 0,
             left: 0,
@@ -229,7 +256,6 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(color: Colors.transparent),
             ),
           ),
-          // 顶部工具栏
           Positioned(
             top: 0,
             right: 0,
@@ -253,7 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          // 编辑工具栏
           EditToolbar(
             isEditMode: isEditMode,
             onExit: () => setState(() => isEditMode = false),
@@ -270,7 +295,6 @@ class _HomeScreenState extends State<HomeScreen> {
               channelWeight = 1 - subWeight - groupWeight;
             }),
           ),
-          // 网速显示
           if (currentSpeed > 0)
             Positioned(
               top: 50,
