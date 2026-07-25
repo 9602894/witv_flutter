@@ -29,3 +29,5 @@ flutter:
   assets:
     - assets/configuration.json
     - assets/epg_data.json
+dependency_overrides:
+  screen_brightness_android: 2.1.7
