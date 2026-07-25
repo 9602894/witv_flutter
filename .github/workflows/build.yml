@@ -58,30 +58,7 @@ jobs:
       - name: Ensure Android project exists
         run: flutter create --platforms=android .
 
-      # 🔧 修补 screen_brightness_android 插件的 Kotlin 源码
-      - name: Patch screen_brightness_android source
-        run: |
-          # 定位插件的 Kotlin 源文件
-          PLUGIN_FILE=$(find $HOME/.pub-cache/hosted/pub.dev/ -path "*/screen_brightness_android*/android/src/main/kotlin/**/ScreenBrightnessAndroidPlugin.kt" | head -n 1)
-          if [ -z "$PLUGIN_FILE" ]; then
-            echo "❌ 未找到 ScreenBrightnessAndroidPlugin.kt"
-            exit 1
-          fi
-          echo "📄 找到源文件: $PLUGIN_FILE"
-          
-          # 备份原文件
-          cp "$PLUGIN_FILE" "$PLUGIN_FILE.bak"
-          
-          # 将 .toUri() 替换为 Uri.parse()
-          sed -i 's/\.toUri()/Uri.parse()/g' "$PLUGIN_FILE"
-          
-          # 确保导入 android.net.Uri（如果不存在则添加）
-          if ! grep -q "import android.net.Uri" "$PLUGIN_FILE"; then
-            # 在文件开头添加 import
-            sed -i '1i import android.net.Uri' "$PLUGIN_FILE"
-          fi
-          
-          echo "✅ 修补完成"
+      # 无需修补，因为 screen_brightness 已被移除
 
       - name: Build Android APK (release)
         run: flutter build apk --release
