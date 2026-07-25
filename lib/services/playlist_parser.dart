@@ -82,7 +82,7 @@ class PlaylistParser {
     await file.writeAsString(content);
     await LogService.write('缓存已保存: ${file.path}');
     // 删除旧缓存（保留最近5个）
-    final files = await cacheDir.list().whereType<File>().toList();
+    final files = await cacheDir.list().where((entity) => entity is File).map((e) => e as File).toList();
     files.sort((a,b) => a.lastModifiedSync().compareTo(b.lastModifiedSync()));
     while (files.length > 5) {
       await files.first.delete();
