@@ -27,7 +27,7 @@ apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace 'com.whyun.witv'
-    compileSdkVersion 34   // 升级到 34 满足 core-ktx 要求
+    compileSdkVersion 34   // 满足 core-ktx 要求
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
