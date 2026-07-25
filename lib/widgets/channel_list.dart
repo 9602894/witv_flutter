@@ -7,6 +7,7 @@ class ChannelList extends StatelessWidget {
   final Channel? selectedChannel;
   final ValueChanged<Channel> onSelect;
   final Map<String, List<EpgProgram>> epgMap;
+  final bool showChannelNumber; // 是否显示频道号
 
   const ChannelList({
     Key? key,
@@ -14,6 +15,7 @@ class ChannelList extends StatelessWidget {
     this.selectedChannel,
     required this.onSelect,
     required this.epgMap,
+    this.showChannelNumber = false,
   }) : super(key: key);
 
   @override
@@ -34,11 +36,24 @@ class ChannelList extends StatelessWidget {
             }
           }
         }
+        // 频道号从 0001 开始
+        final channelNumber = (index + 1).toString().padLeft(4, '0');
         return ListTile(
           selected: isSelected,
           selectedTileColor: Colors.blue.withOpacity(0.3),
-          title: Text(ch.name),
-          subtitle: currentTitle != null ? Text(currentTitle, style: TextStyle(fontSize: 11, color: Colors.grey)) : null,
+          leading: showChannelNumber
+              ? Text(
+                  channelNumber,
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                )
+              : null,
+          title: Text(
+            ch.name,
+            style: TextStyle(color: isSelected ? Colors.yellow : Colors.white),
+          ),
+          subtitle: currentTitle != null
+              ? Text(currentTitle, style: TextStyle(fontSize: 11, color: Colors.grey))
+              : null,
           onTap: () => onSelect(ch),
         );
       },
