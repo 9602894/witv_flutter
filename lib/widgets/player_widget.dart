@@ -20,16 +20,35 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   late VideoController controller;
   int reconnectAttempts = 0;
   bool isReconnecting = false;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    player = Player();
-    controller = VideoController(player);
-    _play();
+    _initPlayer();
+  }
+
+  void _initPlayer() {
+    try {
+      // 检查 media_kit 是否已初始化（通过尝试创建 Player）
+      // 如果未初始化，会抛出异常，捕获后重试
+      player = Player();
+      controller = VideoController(player);
+      _initialized = true;
+      _play();
+    } catch (e) {
+      LogService.write('Player 初始化失败: $e，延迟重试');
+      // 延迟重试
+      Future.delayed(Duration(seconds: 1), () {
+        if (mounted) {
+          _initPlayer();
+        }
+      });
+    }
   }
 
   void _play() {
+    if (!_initialized) return;
     LogService.write('开始播放: ${widget.url}');
     player.open(Media(widget.url));
     player.stream.buffer.listen((buffer) {
@@ -59,7 +78,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     final delay = Duration(milliseconds: (2000 * pow(2, reconnectAttempts - 1)).toInt().clamp(1000, 30000));
     LogService.write('尝试重连，第 $reconnectAttempts 次，延迟 ${delay.inMilliseconds}ms');
     Future.delayed(delay, () {
-      if (mounted) {
+      if (mounted && _initialized) {
         player.open(Media(widget.url));
         isReconnecting = false;
         reconnectAttempts = 0;
@@ -70,6 +89,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_initialized) {
+      return Center(
+        child: CircularProgressIndicator(),
+      );
+    }
     return Video(
       controller: controller,
       fit: BoxFit.contain,
@@ -78,7 +102,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   @override
   void dispose() {
-    player.dispose();
+    if (_initialized) {
+      player.dispose();
+    }
     super.dispose();
   }
 }
