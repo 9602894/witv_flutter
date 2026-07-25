@@ -8,6 +8,7 @@ import '../services/epg_parser.dart';
 import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
+import '../models/subscription.dart';  // 添加这行
 import '../widgets/player_widget.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
@@ -57,31 +58,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _init() async {
-    // 从 SharedPreferences 加载已保存的订阅源（快速）
     await _loadSavedSubscriptions();
-
-    // 如果没有订阅源，从配置添加默认源（后台）
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.subscriptions.isEmpty) {
       await _addDefaultSubscription();
     }
-
-    // 加载选中的订阅源（显示频道列表）
     await _loadInitialSource();
     _checkSubscriptions();
-
     setState(() {
       isLoading = false;
     });
     LogService.write('主页初始化完成');
-
-    // 后台加载 EPG（不阻塞 UI）
     _loadEpgInBackground();
   }
 
   Future<void> _loadSavedSubscriptions() async {
-    // SettingsService 已加载，无需额外操作
-    await Future.delayed(Duration.zero);
+    // 已由 SettingsService 加载，无需额外操作
   }
 
   Future<void> _addDefaultSubscription() async {
@@ -101,7 +93,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
         final settings = Provider.of<SettingsService>(context, listen: false);
-        // 导入 Subscription 模型
         settings.addSubscription(Subscription(name: name, url: url, selected: true));
         LogService.write('自动添加默认订阅源: $name -> $url');
       }
