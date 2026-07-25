@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
+import '../services/settings_service.dart';
 
 class PlayerWidget extends StatefulWidget {
   final String url;
   final VoidCallback onError;
-  final Function(double speed) onSpeedUpdate; // speed 为 M/s
+  final Function(double speed) onSpeedUpdate;
 
   const PlayerWidget({
     Key? key,
@@ -25,6 +27,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   String _currentUrl = '';
   Timer? _bufferTimer;
   double _speed = 0;
+  Timer? _reconnectTimer;
+  bool _isReconnecting = false;
+  int _reconnectAttempts = 0;
 
   @override
   void initState() {
@@ -42,34 +47,67 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         });
         _controller!.play();
         LogService.write('视频初始化成功: $url');
-        // 模拟网速（近似）
+        // 重置重连计数
+        _reconnectAttempts = 0;
+        _isReconnecting = false;
+        _reconnectTimer?.cancel();
+        // 模拟网速
         _bufferTimer?.cancel();
         _bufferTimer = Timer.periodic(Duration(seconds: 1), (timer) {
           if (_controller != null && _controller!.value.buffered.isNotEmpty) {
-            // 近似网速 = 缓冲字节 / 时间（这里用缓冲百分比模拟，实际无法精确）
-            // 为了演示，我们模拟一个值，实际可替换为真实网速监测
-            // 这里我们模拟 0.5 ~ 5 M/s 之间随机，真实场景需要从流中获取数据速率
-            // 为了展示效果，我们使用一个随机值，但你可以通过计算缓冲数据量来估算
-            // 此处我们直接使用随机数模拟，并更新到父组件
-            double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2; // 0.5 ~ 5.5
+            // 近似网速模拟
+            double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
             widget.onSpeedUpdate(simulatedSpeed);
           }
         });
       }).catchError((e) {
         LogService.write('视频初始化失败: $e');
         widget.onError();
-        Future.delayed(Duration(seconds: 3), () {
-          if (mounted && _controller != null && !_controller!.value.isInitialized) {
-            _initPlayer(url);
-          }
-        });
+        // 检查自动重连设置
+        final settings = Provider.of<SettingsService>(context, listen: false);
+        if (settings.autoReconnect) {
+          _startReconnect();
+        }
       });
+  }
+
+  void _startReconnect() {
+    if (_isReconnecting) return;
+    _isReconnecting = true;
+    _reconnectAttempts++;
+    LogService.write('开始重连，第 $_reconnectAttempts 次');
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      // 尝试重新初始化
+      _controller?.dispose();
+      _controller = VideoPlayerController.network(_currentUrl)
+        ..initialize().then((_) {
+          timer.cancel();
+          _isReconnecting = false;
+          setState(() {
+            _isInitialized = true;
+          });
+          _controller!.play();
+          LogService.write('重连成功');
+          _reconnectAttempts = 0;
+        }).catchError((e) {
+          LogService.write('重连失败: $e');
+          // 继续等待下一次尝试
+        });
+    });
   }
 
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
+      _reconnectTimer?.cancel();
+      _isReconnecting = false;
+      _reconnectAttempts = 0;
       _initPlayer(widget.url);
     }
   }
@@ -112,6 +150,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void dispose() {
     _controller?.dispose();
     _bufferTimer?.cancel();
+    _reconnectTimer?.cancel();
     super.dispose();
   }
 }
