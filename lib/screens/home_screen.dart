@@ -51,214 +51,233 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      canRequestFocus: true,
-      onKey: (node, event) {
-        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.back) {
+    return WillPopScope(
+      onWillPop: () async {
+        // 如果右侧菜单显示，则关闭
+        if (_showRightMenu) {
           setState(() {
-            if (_showRightMenu) {
-              _showRightMenu = false;
-            } else {
-              _showRightMenu = true;
-              showOverlay = false;
-            }
+            _showRightMenu = false;
           });
-          return KeyEventResult.handled;
+          return false;
         }
-        return KeyEventResult.ignored;
+        // 如果覆盖层显示，则隐藏
+        if (showOverlay) {
+          setState(() {
+            showOverlay = false;
+          });
+          return false;
+        }
+        // 如果都没显示，弹窗确认退出
+        final shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: Text('提示'),
+            content: Text('确定要退出应用吗？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text('确定'),
+              ),
+            ],
+          ),
+        );
+        if (shouldExit == true) {
+          // 退出应用
+          exit(0);
+        }
+        return false;
       },
-      child: WillPopScope(
-        onWillPop: () async {
-          if (_showRightMenu) {
-            setState(() {
-              _showRightMenu = false;
-            });
-            return false;
-          }
-          if (showOverlay) {
-            setState(() {
-              showOverlay = false;
-            });
-            return false;
-          }
-          // 允许退出
-          return true;
-        },
-        child: Scaffold(
-          body: Stack(
-            children: [
-              if (currentChannel != null)
-                PlayerWidget(
-                  url: currentChannel!.url,
-                  onError: () {
-                    LogService.write('播放器错误回调');
-                  },
-                  onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
-                ),
+      child: Scaffold(
+        body: Stack(
+          children: [
+            // 播放器
+            if (currentChannel != null)
+              PlayerWidget(
+                url: currentChannel!.url,
+                onError: () {
+                  LogService.write('播放器错误回调');
+                },
+                onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
+              ),
 
-              if (showOverlay && !isScheduleMode)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black54,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: (subWeight * 10).toInt(),
-                          child: GroupList(
-                            groups: groups,
-                            selectedGroup: currentGroup,
-                            onSelect: (group) {
-                              setState(() {
-                                currentGroup = group;
-                                _loadGroup(group);
-                              });
-                            },
-                          ),
+            // 主覆盖层（分组+频道列表）
+            if (showOverlay && !isScheduleMode)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: (subWeight * 10).toInt(),
+                        child: GroupList(
+                          groups: groups,
+                          selectedGroup: currentGroup,
+                          onSelect: (group) {
+                            setState(() {
+                              currentGroup = group;
+                              _loadGroup(group);
+                            });
+                          },
                         ),
-                        VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
-                        Expanded(
-                          flex: (channelWeight * 10).toInt(),
-                          child: ChannelList(
-                            channels: channels,
-                            selectedChannel: currentChannel,
-                            onSelect: (ch) {
-                              LogService.write('选择频道: ${ch.name}');
-                              setState(() => currentChannel = ch);
-                            },
-                            epgMap: epgMap,
-                          ),
+                      ),
+                      VerticalDivider(thickness: 2, color: Colors.yellow, width: 2),
+                      Expanded(
+                        flex: (channelWeight * 10).toInt(),
+                        child: ChannelList(
+                          channels: channels,
+                          selectedChannel: currentChannel,
+                          onSelect: (ch) {
+                            LogService.write('选择频道: ${ch.name}');
+                            setState(() => currentChannel = ch);
+                          },
+                          epgMap: epgMap,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ),
-
-              if (isScheduleMode)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black87,
-                    child: ScheduleView(
-                      channels: channels,
-                      selectedChannel: currentChannel,
-                      epgMap: epgMap,
-                      onSelectChannel: (ch) => setState(() => currentChannel = ch),
-                    ),
-                  ),
-                ),
-
-              if (_showRightMenu)
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  bottom: 0,
-                  width: MediaQuery.of(context).size.width * 0.1,
-                  child: Container(
-                    color: Colors.black.withOpacity(0.85),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _buildMenuItem(Icons.settings, '设置', () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => SettingsScreen()),
-                          ).then((_) => setState(() {}));
-                        }),
-                        _buildMenuItem(Icons.edit, '编辑', () {
-                          setState(() {
-                            isEditMode = !isEditMode;
-                            _showRightMenu = false;
-                          });
-                        }),
-                        _buildMenuItem(Icons.schedule, '节目单', () {
-                          setState(() {
-                            isScheduleMode = !isScheduleMode;
-                            _showRightMenu = false;
-                          });
-                        }),
-                        _buildMenuItem(Icons.close, '关闭', () {
-                          setState(() {
-                            _showRightMenu = false;
-                          });
-                        }),
-                      ],
-                    ),
-                  ),
-                ),
-
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 100,
-                child: GestureDetector(
-                  onTap: () {
-                    if (currentChannel != null) {
-                      final programs = EpgParser.getProgramsForChannel(currentChannel!.name);
-                      showInfoPopup(context, currentChannel!, programs, currentSpeed);
-                    }
-                  },
-                  child: Container(color: Colors.transparent),
                 ),
               ),
 
+            // 节目单模式
+            if (isScheduleMode)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black87,
+                  child: ScheduleView(
+                    channels: channels,
+                    selectedChannel: currentChannel,
+                    epgMap: epgMap,
+                    onSelectChannel: (ch) => setState(() => currentChannel = ch),
+                  ),
+                ),
+              ),
+
+            // ========= 右侧菜单（宽度10%） =========
+            if (_showRightMenu)
               Positioned(
                 top: 0,
                 right: 0,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(Icons.schedule, color: Colors.white),
-                      onPressed: () => setState(() => isScheduleMode = !isScheduleMode),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.edit, color: Colors.white),
-                      onPressed: () => setState(() => isEditMode = !isEditMode),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.settings, color: Colors.white),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => SettingsScreen()),
-                      ),
-                    ),
-                  ],
+                bottom: 0,
+                width: MediaQuery.of(context).size.width * 0.1,
+                child: Container(
+                  color: Colors.black.withOpacity(0.85),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildMenuItem(Icons.settings, '设置', () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => SettingsScreen()),
+                        ).then((_) => setState(() {}));
+                      }),
+                      _buildMenuItem(Icons.edit, '编辑', () {
+                        setState(() {
+                          isEditMode = !isEditMode;
+                          _showRightMenu = false;
+                        });
+                      }),
+                      _buildMenuItem(Icons.schedule, '节目单', () {
+                        setState(() {
+                          isScheduleMode = !isScheduleMode;
+                          _showRightMenu = false;
+                        });
+                      }),
+                      _buildMenuItem(Icons.close, '关闭', () {
+                        setState(() {
+                          _showRightMenu = false;
+                        });
+                      }),
+                    ],
+                  ),
                 ),
               ),
 
-              if (isEditMode)
-                EditToolbar(
-                  isEditMode: isEditMode,
-                  onExit: () => setState(() => isEditMode = false),
-                  subWeight: subWeight,
-                  onSubWeightChange: (v) => setState(() {
-                    subWeight = v;
-                    groupWeight = (1 - subWeight) * 0.5;
-                    channelWeight = 1 - subWeight - groupWeight;
-                  }),
-                  groupWeight: groupWeight,
-                  onGroupWeightChange: (v) => setState(() {
-                    groupWeight = v;
-                    subWeight = (1 - groupWeight) * 0.5;
-                    channelWeight = 1 - subWeight - groupWeight;
-                  }),
-                ),
+            // 信息弹窗触发区
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 100,
+              child: GestureDetector(
+                onTap: () {
+                  if (currentChannel != null) {
+                    final programs = EpgParser.getProgramsForChannel(currentChannel!.name);
+                    showInfoPopup(context, currentChannel!, programs, currentSpeed);
+                  }
+                },
+                child: Container(color: Colors.transparent),
+              ),
+            ),
 
-              if (currentSpeed > 0)
-                Positioned(
-                  top: 50,
-                  left: 10,
-                  child: Container(
-                    color: Colors.black54,
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    child: Text(
-                      '${currentSpeed.toStringAsFixed(1)} KB/s',
-                      style: TextStyle(color: Colors.white, fontSize: 12),
+            // 顶部工具栏
+            Positioned(
+              top: 0,
+              right: 0,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.schedule, color: Colors.white),
+                    onPressed: () {
+                      setState(() {
+                        isScheduleMode = !isScheduleMode;
+                        // 如果节目单显示则关闭覆盖层
+                        if (isScheduleMode) showOverlay = false;
+                      });
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.edit, color: Colors.white),
+                    onPressed: () => setState(() => isEditMode = !isEditMode),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.settings, color: Colors.white),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => SettingsScreen()),
                     ),
                   ),
+                ],
+              ),
+            ),
+
+            // 编辑工具栏
+            if (isEditMode)
+              EditToolbar(
+                isEditMode: isEditMode,
+                onExit: () => setState(() => isEditMode = false),
+                subWeight: subWeight,
+                onSubWeightChange: (v) => setState(() {
+                  subWeight = v;
+                  groupWeight = (1 - subWeight) * 0.5;
+                  channelWeight = 1 - subWeight - groupWeight;
+                }),
+                groupWeight: groupWeight,
+                onGroupWeightChange: (v) => setState(() {
+                  groupWeight = v;
+                  subWeight = (1 - groupWeight) * 0.5;
+                  channelWeight = 1 - subWeight - groupWeight;
+                }),
+              ),
+
+            // 网速显示
+            if (currentSpeed > 0)
+              Positioned(
+                top: 50,
+                left: 10,
+                child: Container(
+                  color: Colors.black54,
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Text(
+                    '${currentSpeed.toStringAsFixed(1)} KB/s',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
@@ -284,6 +303,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ========== 以下为数据加载方法（完整实现） ==========
+
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
@@ -300,6 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSavedSubscriptions() async {
+    // 已由 SettingsService 加载，无需额外操作
     await Future.delayed(Duration.zero);
   }
 
