@@ -1,0 +1,90 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'log_service.dart';
+
+class ConfigService {
+  static const String configFileName = 'configuration.json';
+  static Map<String, dynamic>? _config;
+
+  static Future<Map<String, dynamic>> getConfig() async {
+    if (_config != null) return _config!;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$configFileName');
+      String jsonString;
+      if (await file.exists()) {
+        jsonString = await file.readAsString();
+        try {
+          final raw = jsonDecode(jsonString) as Map<String, dynamic>;
+          if (raw.containsKey('Configuration')) {
+            _config = raw;
+            await LogService.write('配置加载成功，键数: ${_config?.length}');
+            return _config!;
+          } else {
+            await LogService.write('外部配置文件缺少 Configuration 键，删除并重新复制');
+            await file.delete();
+          }
+        } catch (e) {
+          await LogService.write('外部配置文件解析失败: $e，从 assets 重新复制');
+          await file.delete();
+        }
+      }
+      // 从 assets 加载
+      jsonString = await rootBundle.loadString('assets/$configFileName');
+      await file.writeAsString(jsonString);
+      final raw = jsonDecode(jsonString) as Map<String, dynamic>;
+      _config = raw;
+      await LogService.write('从 assets 加载配置成功，键数: ${_config?.length}');
+    } catch (e) {
+      await LogService.write('加载配置失败: $e，使用默认空配置');
+      _config = {'Configuration': {}};
+    }
+    return _config!;
+  }
+
+  // 其他方法（saveConfig, resetToDefault, backup, getBackupFiles, restoreFromBackup）保持不变，但确保均有 await LogService.write
+  static Future<void> saveConfig(Map<String, dynamic> config) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/$configFileName');
+    await file.writeAsString(jsonEncode(config));
+    _config = config;
+    await LogService.write('配置已保存');
+  }
+
+  static Future<void> resetToDefault() async {
+    final jsonString = await rootBundle.loadString('assets/$configFileName');
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/$configFileName');
+    await file.writeAsString(jsonString);
+    _config = jsonDecode(jsonString) as Map<String, dynamic>;
+    await LogService.write('重置为默认配置');
+  }
+
+  static Future<void> backup() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final src = File('${dir.path}/$configFileName');
+    if (!await src.exists()) return;
+    final backupDir = Directory('${dir.path}/backup');
+    if (!await backupDir.exists()) await backupDir.create();
+    final backupFile = File('${backupDir.path}/${DateTime.now().millisecondsSinceEpoch}_$configFileName');
+    await src.copy(backupFile.path);
+    await LogService.write('配置已备份');
+  }
+
+  static Future<List<File>> getBackupFiles() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final backupDir = Directory('${dir.path}/backup');
+    if (!await backupDir.exists()) return [];
+    return backupDir.listSync().whereType<File>().where((f) => f.path.endsWith('_$configFileName')).toList();
+  }
+
+  static Future<void> restoreFromBackup(File backupFile) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final target = File('${dir.path}/$configFileName');
+    await backupFile.copy(target.path);
+    _config = jsonDecode(await target.readAsString()) as Map<String, dynamic>;
+    await LogService.write('从备份恢复完成');
+  }
+}
