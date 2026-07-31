@@ -1,3 +1,28 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
+import '../services/settings_service.dart';
+import '../services/config_service.dart';
+import '../services/playlist_parser.dart';
+import '../services/epg_parser.dart';
+import '../services/log_service.dart';
+import '../models/channel.dart';
+import '../models/epg_program.dart';
+import '../models/subscription.dart';
+import '../widgets/player_widget.dart';
+import '../widgets/channel_list.dart';
+import '../widgets/group_list.dart';
+import '../widgets/schedule_view.dart';
+import 'settings_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  @override
+  _HomeScreenState createState() => _HomeScreenState();
+}
+
 class _HomeScreenState extends State<HomeScreen> {
   // ---------- 数据 ----------
   List<Channel> channels = [];
@@ -39,6 +64,45 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late File _layoutConfigFile;
 
+  // ========== 工具函数：北京时间 ==========
+  /// 获取当前 UTC 时间
+  DateTime _getUtcNow() => DateTime.now().toUtc();
+
+  /// 将 UTC 时间格式化为北京时间（+8）的 HH:mm
+  String _formatBeijingTime(DateTime utcTime) {
+    final beijing = utcTime.add(Duration(hours: 8));
+    return '${beijing.hour.toString().padLeft(2, '0')}:${beijing.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 获取当前正在播放的节目（基于 UTC 比较）
+  EpgProgram? _getCurrentProgram(List<EpgProgram> programs) {
+    final now = _getUtcNow();
+    for (var p in programs) {
+      if (p.start.isBefore(now) && p.end.isAfter(now)) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  /// 获取下一个即将播放的节目
+  EpgProgram? _getNextProgram(List<EpgProgram> programs) {
+    final now = _getUtcNow();
+    EpgProgram? current = _getCurrentProgram(programs);
+    if (current == null) {
+      for (var p in programs) {
+        if (p.start.isAfter(now)) return p;
+      }
+      return null;
+    }
+    int index = programs.indexOf(current);
+    if (index >= 0 && index < programs.length - 1) {
+      return programs[index + 1];
+    }
+    return null;
+  }
+
+  // ========== 生命周期 ==========
   @override
   void initState() {
     super.initState();
@@ -145,14 +209,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ========== 加载 EPG 并排序 ==========
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
-      // 对每个频道的节目按开始时间排序
-      all.forEach((key, list) {
-        list.sort((a, b) => a.start.compareTo(b.start));
-      });
       setState(() {
         epgMap = all;
       });
@@ -165,58 +224,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
-      programs.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
         epgMap[channel.name] = programs;
       });
     } catch (e) {
       LogService.write('加载频道 EPG 失败: $e');
     }
-  }
-
-  // ========== 辅助方法：获取当前和下一个节目 ==========
-  (EpgProgram?, EpgProgram?) _getCurrentAndNextPrograms(List<EpgProgram> programs) {
-    final now = DateTime.now();
-    // 确保已排序（外部已排序）
-    for (int i = 0; i < programs.length; i++) {
-      final p = programs[i];
-      if (p.start.isBefore(now) && p.end.isAfter(now)) {
-        final next = (i + 1 < programs.length) ? programs[i + 1] : null;
-        return (p, next);
-      }
-    }
-    return (null, null);
-  }
-
-  // ========== 为 ChannelList 调整 EPG 数据（当前节目移到首位） ==========
-  Map<String, List<EpgProgram>> _buildEpgMapForChannelList() {
-    final now = DateTime.now();
-    Map<String, List<EpgProgram>> result = {};
-    epgMap.forEach((key, programs) {
-      if (programs.isEmpty) {
-        result[key] = [];
-        return;
-      }
-      // 复制排序（原数据已排序，但以防万一）
-      List<EpgProgram> sorted = List.from(programs)..sort((a, b) => a.start.compareTo(b.start));
-      int currentIndex = -1;
-      for (int i = 0; i < sorted.length; i++) {
-        if (sorted[i].start.isBefore(now) && sorted[i].end.isAfter(now)) {
-          currentIndex = i;
-          break;
-        }
-      }
-      if (currentIndex != -1) {
-        // 将当前节目移到第一位
-        List<EpgProgram> reordered = [];
-        reordered.add(sorted[currentIndex]);
-        reordered.addAll(sorted.where((p) => p != sorted[currentIndex]));
-        result[key] = reordered;
-      } else {
-        result[key] = sorted;
-      }
-    });
-    return result;
   }
 
   // ========== 分组切换 ==========
@@ -237,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
     LogService.write('切换到分组: $groupName，频道数: ${channels.length}');
   }
 
-  // ========== 加载订阅源数据（优先缓存，后台更新） ==========
+  // ========== 加载订阅源数据 ==========
   Future<void> _loadSubscriptionData(Subscription sub) async {
     try {
       LogService.write('加载订阅源数据: ${sub.name}');
@@ -467,7 +480,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   Provider.of<SettingsService>(context, listen: false)
                                       .saveLastChannel(ch.name);
                                 },
-                                epgMap: _buildEpgMapForChannelList(),  // 使用调整后的数据
+                                epgMap: epgMap,
                                 showChannelNumber: false,
                                 showLogo: true,
                               ),
@@ -562,7 +575,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
                             },
-                            epgMap: _buildEpgMapForChannelList(),  // 使用调整后的数据
+                            epgMap: epgMap,
                             showChannelNumber: false,
                             showLogo: true,
                           ),
@@ -592,7 +605,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: ScheduleView(
                             channels: channels,
                             selectedChannel: currentChannel,
-                            epgMap: epgMap,  // 使用原始排序数据，内部会高亮当前
+                            epgMap: epgMap,
                             onSelectChannel: (ch) {
                               setState(() {
                                 currentChannel = ch;
@@ -647,7 +660,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- EPG 信息浮窗（修正） ----------
+            // ---------- EPG 信息浮窗（修复：动态获取当前/下一节目） ----------
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -670,16 +683,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ]),
                         ),
                         SizedBox(height: 8),
-                        if (epgMap.containsKey(currentChannel!.name) && epgMap[currentChannel!.name]!.isNotEmpty) ...[
-                          final (current, next) = _getCurrentAndNextPrograms(epgMap[currentChannel!.name]!);
-                          if (current != null) ...[
-                            _buildEpgItem(current, '当前节目'),
-                            SizedBox(height: 4),
-                            if (next != null) _buildEpgItem(next, '下一节目'),
-                          ] else
-                            Text('暂无当前节目', style: TextStyle(color: Colors.white70)),
-                        ] else
-                          Text('暂无EPG信息', style: TextStyle(color: Colors.white70)),
+                        _buildEpgProgramInfo(epgMap[currentChannel!.name] ?? []),
                       ],
                     ),
                   ),
@@ -797,7 +801,50 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 构建订阅源列表 ==========
+  // ========== 构建 EPG 信息（浮窗内容） ==========
+  Widget _buildEpgProgramInfo(List<EpgProgram> programs) {
+    final current = _getCurrentProgram(programs);
+    final next = _getNextProgram(programs);
+    List<Widget> children = [];
+    if (current != null) {
+      children.add(_buildEpgItem(current, '当前节目'));
+      children.add(SizedBox(height: 4));
+    }
+    if (next != null) {
+      children.add(_buildEpgItem(next, '下一节目'));
+    }
+    if (children.isEmpty) {
+      return Text('暂无节目信息', style: TextStyle(color: Colors.white70));
+    }
+    return Column(children: children);
+  }
+
+  // ========== EPG 信息项（已格式化北京时间） ==========
+  Widget _buildEpgItem(EpgProgram prog, String label) {
+    final timeStr = '${_formatBeijingTime(prog.start)}-${_formatBeijingTime(prog.end)}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$label: $timeStr ${prog.title}',
+          style: TextStyle(color: Colors.white, fontSize: 14, shadows: [
+            Shadow(offset: Offset(1,1), blurRadius: 4, color: Colors.black87)
+          ]),
+        ),
+        if (prog.desc != null && prog.desc!.isNotEmpty)
+          Text(
+            prog.desc!,
+            style: TextStyle(color: Colors.white70, fontSize: 12, shadows: [
+              Shadow(offset: Offset(1,1), blurRadius: 4, color: Colors.black87)
+            ]),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+      ],
+    );
+  }
+
+  // ========== 订阅源列表 ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -904,31 +951,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  // ========== EPG 信息项 ==========
-  Widget _buildEpgItem(EpgProgram prog, String label) {
-    final timeStr = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')}';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$label: $timeStr ${prog.title}',
-          style: TextStyle(color: Colors.white, fontSize: 14, shadows: [
-            Shadow(offset: Offset(1,1), blurRadius: 4, color: Colors.black87)
-          ]),
-        ),
-        if (prog.desc != null && prog.desc!.isNotEmpty)
-          Text(
-            prog.desc!,
-            style: TextStyle(color: Colors.white70, fontSize: 12, shadows: [
-              Shadow(offset: Offset(1,1), blurRadius: 4, color: Colors.black87)
-            ]),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-      ],
     );
   }
 
