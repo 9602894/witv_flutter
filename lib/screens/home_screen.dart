@@ -1,3 +1,4 @@
+import 'dart:async';   // ★ 修复 Timer 错误
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -156,9 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ========== EPG 更新调度 ==========
   void _initEpgScheduler() {
-    // 首次启动时检查更新
     _checkEpgUpdate();
-    // 每6小时检查一次
     _epgUpdateTimer = Timer.periodic(Duration(hours: 6), (timer) {
       _checkEpgUpdate();
     });
@@ -206,8 +205,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       currentGroup = groupName;
       channels = groupChannels;
-      // ★ 关键：不修改 currentChannel，保持当前播放频道不变
-      // 如果当前频道不在新列表中，播放器仍会继续播放，但频道列表不会高亮它
     });
     LogService.write('切换到分组: $groupName，频道数: ${channels.length}，当前频道: ${currentChannel?.name ?? '无'}');
   }
@@ -227,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await PlaylistParser.saveCache(groupMap, url, sub.name);
       }
 
-      _fullGroupMap = groupMap; // 缓存所有分组
+      _fullGroupMap = groupMap;
       setState(() {
         groups = groupMap.keys.toList();
         if (groups.isNotEmpty) {
@@ -236,8 +233,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           final groupChannels = groupMap[currentGroup]!;
           channels = groupChannels;
-          // ★ 切换订阅源时，也不自动换台，保持 currentChannel
-          // 但如果 currentChannel 为空，则自动选择第一个
           if (currentChannel == null && channels.isNotEmpty) {
             final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
             if (lastChannel != null) {
@@ -410,7 +405,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 channels: channels,
                                 selectedChannel: currentChannel,
                                 onSelect: (ch) {
-                                  // ★ 只有点击频道时才换台
                                   LogService.write('选择频道: ${ch.name}');
                                   setState(() {
                                     currentChannel = ch;
@@ -506,7 +500,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             channels: channels,
                             selectedChannel: currentChannel,
                             onSelect: (ch) {
-                              // ★ 节目单模式点击频道也换台
                               LogService.write('选择频道: ${ch.name}');
                               setState(() {
                                 currentChannel = ch;
@@ -799,7 +792,6 @@ class _HomeScreenState extends State<HomeScreen> {
               LogService.write('切换订阅源: ${sub.name}');
               settings.toggleSelected(sub);
               _loadSubscriptionData(sub);
-              // 切换订阅源后，也不自动换台，保持当前频道
             },
           );
         },
@@ -827,7 +819,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             onTap: () {
               LogService.write('切换到分组: $group');
-              _switchToGroup(group); // 只切换列表，不换台
+              _switchToGroup(group);
             },
           );
         },
@@ -981,7 +973,6 @@ class _HomeScreenState extends State<HomeScreen> {
       isLoading = false;
     });
     LogService.write('初始化完成');
-    // EPG 更新在调度器中处理
   }
 
   Future<void> _loadSavedSubscriptions() async => Future.delayed(Duration.zero);
