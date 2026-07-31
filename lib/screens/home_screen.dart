@@ -1,8 +1,7 @@
-import 'dart:io'; // 添加此行
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:io' show exit;
-import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/config_service.dart';
@@ -47,16 +46,20 @@ class _HomeScreenState extends State<HomeScreen> {
   double scheduleChannelWeight = 0.35;
   double scheduleWeight = 0.40;
 
-  // ---------- 按钮偏移（无限制） ----------
-  Offset scheduleModeButtonOffset = Offset.zero;   // “频道组”按钮偏移
-  Offset channelListButtonOffset = Offset.zero;    // “节目单”按钮偏移
+  // ---------- 按钮偏移 ----------
+  Offset scheduleModeButtonOffset = Offset.zero;
+  Offset channelListButtonOffset = Offset.zero;
+
+  // 按钮初始垂直居中位置
+  double _scheduleButtonInitTop = 0;
+  double _channelButtonInitTop = 0;
 
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
 
-  // ---------- 布局配置文件路径 ----------
+  // ---------- 布局配置文件 ----------
   late File _layoutConfigFile;
 
   @override
@@ -68,26 +71,32 @@ class _HomeScreenState extends State<HomeScreen> {
     _init();
   }
 
-  // 初始化配置文件
   Future<void> _initLayoutConfigFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    _layoutConfigFile = File('${dir.path}/layout_config.json');
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      _layoutConfigFile = File('${dir.path}/layout_config.json');
+      LogService.write('配置文件路径: ${_layoutConfigFile.path}');
+      // 如果文件不存在，创建默认配置
+      if (!await _layoutConfigFile.exists()) {
+        await _saveLayoutConfig(); // 创建默认文件
+        LogService.write('创建默认配置文件');
+      }
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
   }
 
-  // 加载布局配置
   Future<void> _loadLayoutConfig() async {
     try {
       if (await _layoutConfigFile.exists()) {
         final content = await _layoutConfigFile.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
-        // 列宽
         subWeight = json['subWeight']?.toDouble() ?? 0.20;
         groupWeight = json['groupWeight']?.toDouble() ?? 0.20;
         channelWeight = json['channelWeight']?.toDouble() ?? 0.60;
         scheduleGroupWeight = json['scheduleGroupWeight']?.toDouble() ?? 0.25;
         scheduleChannelWeight = json['scheduleChannelWeight']?.toDouble() ?? 0.35;
         scheduleWeight = json['scheduleWeight']?.toDouble() ?? 0.40;
-        // 按钮偏移（无限制）
         scheduleModeButtonOffset = Offset(
           json['scheduleModeButtonDx']?.toDouble() ?? 0.0,
           json['scheduleModeButtonDy']?.toDouble() ?? 0.0,
@@ -97,13 +106,14 @@ class _HomeScreenState extends State<HomeScreen> {
           json['channelListButtonDy']?.toDouble() ?? 0.0,
         );
         LogService.write('布局配置加载成功');
+      } else {
+        LogService.write('配置文件不存在，使用默认值');
       }
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
     }
   }
 
-  // 保存布局配置
   Future<void> _saveLayoutConfig() async {
     try {
       final json = {
@@ -118,14 +128,25 @@ class _HomeScreenState extends State<HomeScreen> {
         'channelListButtonDx': channelListButtonOffset.dx,
         'channelListButtonDy': channelListButtonOffset.dy,
       };
-      await _layoutConfigFile.writeAsString(jsonEncode(json));
-      LogService.write('布局配置已保存');
+      final content = jsonEncode(json);
+      await _layoutConfigFile.writeAsString(content);
+      LogService.write('布局配置已保存到: ${_layoutConfigFile.path}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
+      // 如果保存失败，尝试重新创建目录
+      try {
+        final dir = _layoutConfigFile.parent;
+        if (!await dir.exists()) {
+          await dir.create(recursive: true);
+          await _layoutConfigFile.writeAsString(jsonEncode({}));
+          LogService.write('重新创建目录并保存成功');
+        }
+      } catch (e2) {
+        LogService.write('保存配置彻底失败: $e2');
+      }
     }
   }
 
-  // 退出编辑时保存
   void _exitEditMode() {
     setState(() {
       isEditMode = false;
@@ -134,7 +155,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void dispose() {
+    // 在页面销毁时保存一次（防止退出应用时丢失）
+    _saveLayoutConfig();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    _scheduleButtonInitTop = (screenHeight - 80) / 2;
+    _channelButtonInitTop = (screenHeight - 80) / 2;
+
     return WillPopScope(
       onWillPop: () async {
         if (_showEpgInfo) {
@@ -294,11 +326,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 showLogo: true,
                               ),
                             ),
-                            // 竖排“节目单”按钮（可无限制拖拽）
+                            // 竖排“节目单”按钮
                             Positioned(
-                              right: 20 + channelListButtonOffset.dx,
-                              top: channelListButtonOffset.dy,
-                              bottom: null,
+                              right: 20 - channelListButtonOffset.dx,
+                              top: _channelButtonInitTop + channelListButtonOffset.dy,
                               child: GestureDetector(
                                 onPanUpdate: (details) {
                                   if (!isEditMode) return;
@@ -314,6 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 },
                                 child: Container(
                                   width: 26,
+                                  height: 80,
                                   color: Colors.transparent,
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -431,13 +463,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
-                    // “频道组”按钮（竖排，左侧垂直居中，可无限制拖拽）
+                    // “频道组”按钮
                     Positioned(
                       left: 8 + scheduleModeButtonOffset.dx,
-                      top: null,
-                      bottom: null,
-                      height: 80,
-                      width: 26,
+                      top: _scheduleButtonInitTop + scheduleModeButtonOffset.dy,
                       child: GestureDetector(
                         onPanUpdate: (details) {
                           if (!isEditMode) return;
@@ -452,6 +481,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           });
                         },
                         child: Container(
+                          width: 26,
+                          height: 80,
                           color: Colors.transparent,
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -524,15 +555,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         setState(() => _showRightMenu = false);
                       }),
                       _buildMenuItem(Icons.edit, '编辑', () {
-                        setState(() {
-                          // 如果正在编辑，则退出并保存；否则进入编辑
-                          if (isEditMode) {
-                            _exitEditMode();
-                          } else {
-                            isEditMode = true;
-                          }
-                          _showRightMenu = false;
-                        });
+                        if (isEditMode) {
+                          _exitEditMode();
+                        } else {
+                          setState(() => isEditMode = true);
+                        }
+                        setState(() => _showRightMenu = false);
                       }),
                       _buildMenuItem(Icons.list, '列表订阅', () {
                         _showAddSubscriptionDialog();
@@ -627,7 +655,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 构建订阅源列表 ==========
+  // ========== 构建订阅源列表（保持不变） ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -652,9 +680,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              onTap: () {
-                // 收藏功能待实现
-              },
+              onTap: () {},
             );
           }
           final sub = subs[index - 1];
@@ -741,7 +767,6 @@ class _HomeScreenState extends State<HomeScreen> {
               LogService.write('切换到分组: $group');
               setState(() {
                 currentGroup = group;
-                // 更新频道列表
                 final settings = Provider.of<SettingsService>(context, listen: false);
                 final selected = settings.subscriptions.where((s) => s.selected).toList();
                 if (selected.isNotEmpty) {
