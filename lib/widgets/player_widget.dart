@@ -31,60 +31,33 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   double _speed = 0;
   bool _isReconnecting = false;
 
+  // ★ 新增：加载状态
+  bool _isLoading = false;
+
   @override
   void initState() {
     super.initState();
     _initPlayer(widget.url);
   }
 
-  /// 检测当前网络是否经过代理/VPN
-  Future<String> _getProxyStatus() async {
-    try {
-      // 1. 检查环境变量代理
-      final httpProxy = Platform.environment['http_proxy'] ??
-                         Platform.environment['HTTP_PROXY'];
-      final httpsProxy = Platform.environment['https_proxy'] ??
-                          Platform.environment['HTTPS_PROXY'];
-      if ((httpProxy != null && httpProxy.isNotEmpty) ||
-          (httpsProxy != null && httpsProxy.isNotEmpty)) {
-        return '代理 (环境变量)';
-      }
-
-      // 2. 检查网络接口是否存在虚拟 VPN 接口
-      final interfaces = await NetworkInterface.list(
-        includeLinkLocal: false,
-        includeLoopback: false,
-      );
-      
-      // 收集所有接口名称用于日志
-      final interfaceNames = interfaces.map((i) => i.name).join(', ');
-      LogService.write('检测到的网络接口: $interfaceNames');
-
-      // 常见 VPN 接口名称关键词（不区分大小写）
-      const vpnKeywords = ['tun', 'ppp', 'utun', 'tap', 'wg', 'ipsec'];
-      for (var iface in interfaces) {
-        final name = iface.name.toLowerCase();
-        for (var keyword in vpnKeywords) {
-          if (name.contains(keyword)) {
-            // 记录接口地址（可选）
-            final addresses = iface.addresses.map((a) => a.address).join(', ');
-            LogService.write('发现 VPN 接口: ${iface.name} (地址: $addresses)');
-            return 'VPN ($keyword 接口)';
-          }
-        }
-      }
-
-      return '直连';
-    } catch (e) {
-      LogService.write('检测代理状态失败: $e');
-      return '未知 (检测失败)';
-    }
-  }
-
-  void _initPlayer(String url) async {
+  // ★ 优化：使用 Future.microtask 让 UI 先更新，再初始化播放器
+  void _initPlayer(String url) {
     _currentUrl = url;
+    _isLoading = true;
+    setState(() {}); // 立即显示加载状态
+
+    // 取消旧控制器，但不立即 dispose，让旧播放器继续播放直到新控制器准备好
+    // 但我们直接 dispose 并创建新的，因为 video_player 不支持复用
     _controller?.dispose();
 
+    // 延迟一帧，让 UI 先刷新
+    Future.microtask(() {
+      _createController(url);
+    });
+  }
+
+  void _createController(String url) async {
+    // 先检测网络状态（仅日志）
     final proxyStatus = await _getProxyStatus();
     LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
 
@@ -93,6 +66,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         if (mounted) {
           setState(() {
             _isInitialized = true;
+            _isLoading = false;
           });
           _controller!.play();
           LogService.write('视频初始化成功: $url');
@@ -102,14 +76,35 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         }
       }).catchError((e) {
         LogService.write('视频初始化失败: $e');
-        _getProxyStatus().then((status) {
-          LogService.write('播放失败时网络状态: $status');
+        setState(() {
+          _isLoading = false;
         });
         widget.onError();
         if (!_isReconnecting) {
           _attemptReconnect();
         }
       });
+  }
+
+  // 检测代理状态（仅日志）
+  Future<String> _getProxyStatus() async {
+    try {
+      final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
+      final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
+      if ((httpProxy != null && httpProxy.isNotEmpty) ||
+          (httpsProxy != null && httpsProxy.isNotEmpty)) {
+        return '代理 (环境变量)';
+      }
+      final interfaces = await NetworkInterface.list(includeLinkLocal: false);
+      for (var iface in interfaces) {
+        if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
+          return 'VPN (虚拟接口)';
+        }
+      }
+      return '直连';
+    } catch (e) {
+      return '未知';
+    }
   }
 
   String _extractChannelName(String url) {
@@ -169,9 +164,23 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isInitialized || _controller == null) {
-      return Container(color: Colors.transparent);
+    // ★ 显示加载状态
+    if (_isLoading || !_isInitialized || _controller == null) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Colors.white),
+              SizedBox(height: 10),
+              Text('加载中...', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+      );
     }
+
     return Stack(
       children: [
         Positioned.fill(
