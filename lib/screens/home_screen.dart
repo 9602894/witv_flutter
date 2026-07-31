@@ -37,18 +37,18 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isEditMode = false;
   bool _showRightMenu = false;
 
-  // ---------- 宽度控制 ----------
-  double subWeight = 0.20;
-  double groupWeight = 0.20;
-  double channelWeight = 0.60;
+  // ---------- 宽度控制（使用用户提供的默认值） ----------
+  double subWeight = 0.2;
+  double groupWeight = 0.2;
+  double channelWeight = 0.6;
 
   double scheduleGroupWeight = 0.25;
   double scheduleChannelWeight = 0.35;
-  double scheduleWeight = 0.40;
+  double scheduleWeight = 0.4;
 
-  // ---------- 按钮偏移 ----------
-  Offset scheduleModeButtonOffset = Offset.zero;
-  Offset channelListButtonOffset = Offset.zero;
+  // ---------- 按钮偏移（使用用户提供的默认值） ----------
+  Offset scheduleModeButtonOffset = Offset(714.8865763346365, 7.9911295572917425);
+  Offset channelListButtonOffset = Offset(-133.9163004557305, -4.6614786783854925);
 
   // 按钮初始垂直居中位置
   double _scheduleButtonInitTop = 0;
@@ -58,6 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
+
+  // ---------- 缓存所有分组数据 ----------
+  Map<String, List<Channel>>? _fullGroupMap;
 
   // ---------- 布局配置文件 ----------
   late File _layoutConfigFile;
@@ -76,9 +79,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final dir = await getApplicationDocumentsDirectory();
       _layoutConfigFile = File('${dir.path}/layout_config.json');
       LogService.write('配置文件路径: ${_layoutConfigFile.path}');
-      // 如果文件不存在，创建默认配置
       if (!await _layoutConfigFile.exists()) {
-        await _saveLayoutConfig(); // 创建默认文件
+        await _saveLayoutConfig(); // 使用默认值创建
         LogService.write('创建默认配置文件');
       }
     } catch (e, stack) {
@@ -91,19 +93,19 @@ class _HomeScreenState extends State<HomeScreen> {
       if (await _layoutConfigFile.exists()) {
         final content = await _layoutConfigFile.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
-        subWeight = json['subWeight']?.toDouble() ?? 0.20;
-        groupWeight = json['groupWeight']?.toDouble() ?? 0.20;
-        channelWeight = json['channelWeight']?.toDouble() ?? 0.60;
-        scheduleGroupWeight = json['scheduleGroupWeight']?.toDouble() ?? 0.25;
-        scheduleChannelWeight = json['scheduleChannelWeight']?.toDouble() ?? 0.35;
-        scheduleWeight = json['scheduleWeight']?.toDouble() ?? 0.40;
+        subWeight = json['subWeight']?.toDouble() ?? subWeight;
+        groupWeight = json['groupWeight']?.toDouble() ?? groupWeight;
+        channelWeight = json['channelWeight']?.toDouble() ?? channelWeight;
+        scheduleGroupWeight = json['scheduleGroupWeight']?.toDouble() ?? scheduleGroupWeight;
+        scheduleChannelWeight = json['scheduleChannelWeight']?.toDouble() ?? scheduleChannelWeight;
+        scheduleWeight = json['scheduleWeight']?.toDouble() ?? scheduleWeight;
         scheduleModeButtonOffset = Offset(
-          json['scheduleModeButtonDx']?.toDouble() ?? 0.0,
-          json['scheduleModeButtonDy']?.toDouble() ?? 0.0,
+          json['scheduleModeButtonDx']?.toDouble() ?? scheduleModeButtonOffset.dx,
+          json['scheduleModeButtonDy']?.toDouble() ?? scheduleModeButtonOffset.dy,
         );
         channelListButtonOffset = Offset(
-          json['channelListButtonDx']?.toDouble() ?? 0.0,
-          json['channelListButtonDy']?.toDouble() ?? 0.0,
+          json['channelListButtonDx']?.toDouble() ?? channelListButtonOffset.dx,
+          json['channelListButtonDy']?.toDouble() ?? channelListButtonOffset.dy,
         );
         LogService.write('布局配置加载成功');
       } else {
@@ -133,17 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
       LogService.write('布局配置已保存到: ${_layoutConfigFile.path}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
-      // 如果保存失败，尝试重新创建目录
-      try {
-        final dir = _layoutConfigFile.parent;
-        if (!await dir.exists()) {
-          await dir.create(recursive: true);
-          await _layoutConfigFile.writeAsString(jsonEncode({}));
-          LogService.write('重新创建目录并保存成功');
-        }
-      } catch (e2) {
-        LogService.write('保存配置彻底失败: $e2');
-      }
     }
   }
 
@@ -156,9 +147,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    // 在页面销毁时保存一次（防止退出应用时丢失）
     _saveLayoutConfig();
     super.dispose();
+  }
+
+  // ===== 分组切换优化：直接从内存缓存取数据 =====
+  void _switchToGroup(String groupName) {
+    if (_fullGroupMap == null) {
+      LogService.write('错误：_fullGroupMap 为空，无法切换分组');
+      return;
+    }
+    final groupChannels = _fullGroupMap![groupName];
+    if (groupChannels == null) {
+      LogService.write('分组 $groupName 不存在');
+      return;
+    }
+    setState(() {
+      currentGroup = groupName;
+      channels = groupChannels;
+      if (channels.isNotEmpty) {
+        final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
+        if (lastChannel != null) {
+          final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
+          currentChannel = found;
+        } else {
+          currentChannel = channels.first;
+        }
+        _showEpgInfo = true;
+      }
+    });
+    LogService.write('切换到分组: $groupName，频道数: ${channels.length}');
   }
 
   @override
@@ -655,7 +673,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 构建订阅源列表（保持不变） ==========
+  // ========== 构建订阅源列表 ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -719,13 +737,15 @@ class _HomeScreenState extends State<HomeScreen> {
         await PlaylistParser.saveCache(groupMap, url, sub.name);
       }
 
+      _fullGroupMap = groupMap; // 缓存所有分组
       setState(() {
         groups = groupMap.keys.toList();
         if (groups.isNotEmpty) {
           if (currentGroup == null || !groups.contains(currentGroup)) {
             currentGroup = groups.first;
           }
-          channels = groupMap[currentGroup]!;
+          final groupChannels = groupMap[currentGroup]!;
+          channels = groupChannels;
           if (channels.isNotEmpty) {
             final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
             if (lastChannel != null) {
@@ -765,15 +785,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             onTap: () {
               LogService.write('切换到分组: $group');
-              setState(() {
-                currentGroup = group;
-                final settings = Provider.of<SettingsService>(context, listen: false);
-                final selected = settings.subscriptions.where((s) => s.selected).toList();
-                if (selected.isNotEmpty) {
-                  final sub = selected.first;
-                  _loadSubscriptionData(sub);
-                }
-              });
+              _switchToGroup(group); // 使用内存缓存
             },
           );
         },
