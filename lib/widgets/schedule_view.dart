@@ -12,6 +12,7 @@ class ScheduleView extends StatefulWidget {
   final double rightWeight;
   final ValueChanged<double> onLeftWeightChanged;
   final bool isEditMode;
+  final bool showLeft; // 新增：是否显示左侧频道列表
 
   const ScheduleView({
     Key? key,
@@ -23,6 +24,7 @@ class ScheduleView extends StatefulWidget {
     this.rightWeight = 0.65,
     required this.onLeftWeightChanged,
     this.isEditMode = false,
+    this.showLeft = true,
   }) : super(key: key);
 
   @override
@@ -80,81 +82,91 @@ class _ScheduleViewState extends State<ScheduleView> {
           '${p.start.year}-${p.start.month}-${p.start.day}' == targetDay).cast<EpgProgram>().toList();
     }
 
-    return Row(
+    if (widget.showLeft) {
+      // 两列布局（左侧频道列表 + 右侧节目单）
+      return Row(
+        children: [
+          Expanded(
+            flex: (widget.leftWeight * 100).toInt(),
+            child: ChannelList(
+              channels: widget.channels,
+              selectedChannel: widget.selectedChannel,
+              onSelect: widget.onSelectChannel,
+              epgMap: widget.epgMap,
+              showChannelNumber: false,
+              showLogo: true,
+            ),
+          ),
+          _buildDragBar(),
+          Expanded(
+            flex: (widget.rightWeight * 100).toInt(),
+            child: _buildSchedule(dayPrograms),
+          ),
+        ],
+      );
+    } else {
+      // 仅显示节目单（用于三列布局）
+      return _buildSchedule(dayPrograms);
+    }
+  }
+
+  Widget _buildSchedule(List<EpgProgram> dayPrograms) {
+    return Column(
       children: [
-        Expanded(
-          flex: (widget.leftWeight * 100).toInt(),
-          child: ChannelList(
-            channels: widget.channels,
-            selectedChannel: widget.selectedChannel,
-            onSelect: widget.onSelectChannel,
-            epgMap: widget.epgMap,
-            showChannelNumber: false,
-            showLogo: true,
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: dayLabels.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final label = entry.value;
+              final isSelected = idx == selectedDayIndex;
+              final display = _formatDayLabel(label);
+              return GestureDetector(
+                onTap: () => setState(() => selectedDayIndex = idx),
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  margin: EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.blue : Colors.transparent,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(display, style: TextStyle(color: Colors.white)),
+                ),
+              );
+            }).toList(),
           ),
         ),
-        _buildDragBar(),
         Expanded(
-          flex: (widget.rightWeight * 100).toInt(),
-          child: Column(
-            children: [
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: dayLabels.asMap().entries.map((entry) {
-                    final idx = entry.key;
-                    final label = entry.value;
-                    final isSelected = idx == selectedDayIndex;
-                    final display = _formatDayLabel(label);
-                    return GestureDetector(
-                      onTap: () => setState(() => selectedDayIndex = idx),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        margin: EdgeInsets.symmetric(horizontal: 2),
-                        decoration: BoxDecoration(
-                          color: isSelected ? Colors.blue : Colors.transparent,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(display, style: TextStyle(color: Colors.white)),
-                      ),
-                    );
-                  }).toList(),
+          child: ListView.builder(
+            itemCount: dayPrograms.length,
+            itemBuilder: (context, index) {
+              final prog = dayPrograms[index];
+              final now = DateTime.now();
+              final isCurrent = prog.start.isBefore(now) && prog.end.isAfter(now);
+              final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
+              return Container(
+                color: isCurrent ? Colors.blue.withOpacity(0.4) : Colors.transparent,
+                child: ListTile(
+                  leading: Text(
+                    timeStr,
+                    style: TextStyle(
+                      color: isCurrent ? Colors.yellow : Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                  title: Text(
+                    prog.title,
+                    style: TextStyle(
+                      color: isCurrent ? Colors.yellow : Colors.white,
+                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  subtitle: prog.desc != null && prog.desc!.isNotEmpty
+                      ? Text(prog.desc!, style: TextStyle(fontSize: 11, color: Colors.white60))
+                      : null,
                 ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: dayPrograms.length,
-                  itemBuilder: (context, index) {
-                    final prog = dayPrograms[index];
-                    final now = DateTime.now();
-                    final isCurrent = prog.start.isBefore(now) && prog.end.isAfter(now);
-                    final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
-                    return Container(
-                      color: isCurrent ? Colors.blue.withOpacity(0.4) : Colors.transparent,
-                      child: ListTile(
-                        leading: Text(
-                          timeStr,
-                          style: TextStyle(
-                            color: isCurrent ? Colors.yellow : Colors.white70,
-                            fontSize: 12,
-                          ),
-                        ),
-                        title: Text(
-                          prog.title,
-                          style: TextStyle(
-                            color: isCurrent ? Colors.yellow : Colors.white,
-                            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                        subtitle: prog.desc != null && prog.desc!.isNotEmpty
-                            ? Text(prog.desc!, style: TextStyle(fontSize: 11, color: Colors.white60))
-                            : null,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+              );
+            },
           ),
         ),
       ],
