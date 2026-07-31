@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
@@ -7,6 +8,12 @@ import 'services/log_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
+
+  // 强制横屏（锁定左右横屏）
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
 
   // 捕获错误
   FlutterError.onError = (FlutterErrorDetails details) {
