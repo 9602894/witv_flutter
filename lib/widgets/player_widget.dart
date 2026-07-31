@@ -47,18 +47,15 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
       _isFailed = false;
-      // 预加载新播放器
       _preloadPlayer();
     }
   }
 
-  // 预加载新播放器（不阻塞UI）
   Future<void> _preloadPlayer() async {
     if (_isDisposed) return;
     _isLoading = true;
     setState(() {});
 
-    // 清理旧预加载控制器
     await _nextController?.dispose();
     _nextController = null;
 
@@ -69,23 +66,17 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       await _nextController!.initialize().timeout(Duration(seconds: 2));
       if (_isDisposed) return;
       LogService.write('预加载成功: $_currentUrl');
-      // 预加载成功，立即切换
       _swapController();
     } catch (e) {
       LogService.write('预加载失败: $e，回退直接加载');
-      // 回退到传统加载
       _initPlayer();
     }
   }
 
-  // 无缝切换控制器
   void _swapController() {
     if (_nextController == null || _isDisposed) return;
-    // 移除旧监听
     _controller?.removeListener(_onControllerListener);
-    // 暂停旧控制器（但保留画面）
     _controller?.pause();
-    // 交换
     _controller = _nextController;
     _nextController = null;
     _isInitialized = true;
@@ -99,7 +90,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     LogService.write('切换完成: $_currentUrl');
   }
 
-  // 直接加载（无预加载时使用）
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
     await _controller?.dispose();
@@ -181,9 +171,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     try {
       final uri = Uri.parse(url);
       final segments = uri.pathSegments;
-      if (segments.isNotEmpty) return segments.last.split('.').first;
+      if (segments.isNotEmpty) {
+        return segments.last.split('.').first;
+      }
       return url;
-    } catch (_) => url;
+    } catch (_) {
+      return url;
+    }
   }
 
   @override
