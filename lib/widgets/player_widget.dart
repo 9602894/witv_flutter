@@ -31,7 +31,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   double _speed = 0;
   bool _isReconnecting = false;
 
-  // 缓存代理状态，避免重复检测
   static String? _cachedProxyStatus;
 
   @override
@@ -44,23 +43,26 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   Future<String> _checkProxyStatus() async {
     if (_cachedProxyStatus != null) return _cachedProxyStatus!;
     try {
-      // 使用 HttpClient 检测环境代理
-      final client = HttpClient();
-      final proxy = client.findProxy(Uri.parse('http://example.com'));
+      // 方法1：检查环境变量
+      final httpProxy = Platform.environment['http_proxy'] ??
+                         Platform.environment['HTTP_PROXY'];
+      final httpsProxy = Platform.environment['https_proxy'] ??
+                          Platform.environment['HTTPS_PROXY'];
+      if ((httpProxy != null && httpProxy.isNotEmpty) ||
+          (httpsProxy != null && httpsProxy.isNotEmpty)) {
+        _cachedProxyStatus = 'VPN (环境变量)';
+        return _cachedProxyStatus!;
+      }
+
+      // 方法2：使用 HttpClient.findProxyFromEnvironment（静态方法）
+      final proxy = HttpClient.findProxyFromEnvironment(
+        Uri.parse('http://example.com'),
+        environment: Platform.environment,
+      );
       if (proxy != null && proxy.isNotEmpty && proxy != 'DIRECT') {
-        _cachedProxyStatus = 'VPN (代理)';
+        _cachedProxyStatus = 'VPN (系统代理)';
       } else {
-        // 额外检查环境变量
-        final httpProxy = Platform.environment['http_proxy'] ??
-                           Platform.environment['HTTP_PROXY'];
-        final httpsProxy = Platform.environment['https_proxy'] ??
-                            Platform.environment['HTTPS_PROXY'];
-        if ((httpProxy != null && httpProxy.isNotEmpty) ||
-            (httpsProxy != null && httpsProxy.isNotEmpty)) {
-          _cachedProxyStatus = 'VPN (环境变量)';
-        } else {
-          _cachedProxyStatus = '直连';
-        }
+        _cachedProxyStatus = '直连';
       }
     } catch (e) {
       LogService.write('代理检测异常: $e');
@@ -72,8 +74,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _initPlayer(String url) {
     _currentUrl = url;
     _controller?.dispose();
-    
-    // 记录频道和代理状态
+
     _checkProxyStatus().then((status) {
       LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $status');
     });
@@ -99,7 +100,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       });
   }
 
-  // 从 URL 中提取频道名（简单处理，仅用于日志）
   String _extractChannelName(String url) {
     try {
       final uri = Uri.parse(url);
@@ -117,7 +117,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
       if (_controller != null && _controller!.value.isInitialized) {
-        // 模拟网速（0.5-5 M/s），避免显示0.0
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() {
           _speed = simulatedSpeed;
