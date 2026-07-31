@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:niuma_player/niuma_player.dart';
+import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
 
 class PlayerWidget extends StatefulWidget {
@@ -20,7 +20,8 @@ class PlayerWidget extends StatefulWidget {
 }
 
 class _PlayerWidgetState extends State<PlayerWidget> {
-  NiumaPlayerController? _controller;
+  VideoPlayerController? _controller;
+  VideoPlayerController? _nextController;
   bool _isInitialized = false;
   bool _isLoading = true;
   bool _isFailed = false;
@@ -29,7 +30,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   Timer? _speedTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 3;
+  static const int maxReconnectAttempts = 5;   // 增加重试次数
+  static const int initTimeoutMs = 3000;       // 3秒超时
+  static const int retryDelayMs = 1000;        // 1秒重试间隔
   double _speed = 0;
 
   @override
@@ -46,13 +49,51 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
       _isFailed = false;
+      _preloadPlayer();
+    }
+  }
+
+  Future<void> _preloadPlayer() async {
+    if (_isDisposed) return;
+    _isLoading = true;
+    setState(() {});
+
+    await _nextController?.dispose();
+    _nextController = null;
+
+    LogService.write('预加载频道: ${_extractChannelName(_currentUrl)}');
+
+    try {
+      _nextController = VideoPlayerController.network(_currentUrl);
+      await _nextController!.initialize().timeout(Duration(milliseconds: initTimeoutMs));
+      if (_isDisposed) return;
+      LogService.write('预加载成功: $_currentUrl');
+      _swapController();
+    } catch (e) {
+      LogService.write('预加载失败: $e，回退直接加载');
       _initPlayer();
     }
   }
 
+  void _swapController() {
+    if (_nextController == null || _isDisposed) return;
+    _controller?.removeListener(_onControllerListener);
+    _controller?.pause();
+    _controller = _nextController;
+    _nextController = null;
+    _isInitialized = true;
+    _isLoading = false;
+    _isFailed = false;
+    _controller!.addListener(_onControllerListener);
+    _controller!.play();
+    setState(() {});
+    _startSpeedMonitor();
+    _reconnectAttempts = 0;
+    LogService.write('切换完成: $_currentUrl');
+  }
+
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
-    await _controller?.stop();
     await _controller?.dispose();
     _controller = null;
     _isInitialized = false;
@@ -60,32 +101,23 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _isFailed = false;
     setState(() {});
 
-    LogService.write('播放频道 (Niuma): ${_extractChannelName(_currentUrl)}');
+    LogService.write('直接加载频道: ${_extractChannelName(_currentUrl)}');
 
     try {
-      _controller = NiumaPlayerController();
-      _controller!.addListener(_onControllerListener);
-      
-      // 加载网络源（支持 m3u8 / ts）
-      await _controller!.load(
-        NiumaDataSource.network(_currentUrl),
-        autoPlay: true,
-        // 可选：设置重试策略
-        retryConfig: NiumaRetryConfig(maxAttempts: 3, delay: Duration(milliseconds: 500)),
-      ).timeout(Duration(seconds: 3));
-      
+      _controller = VideoPlayerController.network(_currentUrl);
+      await _controller!.initialize().timeout(Duration(milliseconds: initTimeoutMs));
       if (_isDisposed) return;
       setState(() {
         _isInitialized = true;
         _isLoading = false;
-        _isFailed = false;
       });
-      LogService.write('Niuma 初始化成功: $_currentUrl');
+      _controller!.play();
+      LogService.write('直接加载成功: $_currentUrl');
       _startSpeedMonitor();
       _reconnectAttempts = 0;
     } catch (e) {
       if (_isDisposed) return;
-      LogService.write('Niuma 初始化失败: $e');
+      LogService.write('直接加载失败: $e');
       setState(() {
         _isLoading = false;
         _isFailed = true;
@@ -98,10 +130,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _scheduleReconnect() {
     if (_reconnectAttempts >= maxReconnectAttempts) {
       setState(() => _isFailed = true);
+      LogService.write('重试次数已达上限');
       return;
     }
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(milliseconds: 500), () {
+    _reconnectTimer = Timer(Duration(milliseconds: retryDelayMs), () {
       if (_isDisposed) return;
       _reconnectAttempts++;
       _initPlayer();
@@ -110,12 +143,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _onControllerListener() {
     if (_controller == null || _isDisposed) return;
-    final state = _controller!.value;
-    if (state.isPlaying) {
-      setState(() => _isLoading = false);
-    }
-    if (state.hasError) {
-      LogService.write('Niuma 播放错误: ${state.errorDescription}');
+    if (_controller!.value.hasError) {
+      LogService.write('播放错误: ${_controller!.value.errorDescription}');
       if (_reconnectAttempts < maxReconnectAttempts) {
         _scheduleReconnect();
       } else {
@@ -133,7 +162,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      if (_controller != null && _controller!.value.isPlaying) {
+      if (_controller != null && _controller!.value.isInitialized) {
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() => _speed = simulatedSpeed);
         widget.onSpeedUpdate(simulatedSpeed);
@@ -145,13 +174,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     try {
       final uri = Uri.parse(url);
       final segments = uri.pathSegments;
-      if (segments.isNotEmpty) {
-        return segments.last.split('.').first;
-      }
+      if (segments.isNotEmpty) return segments.last.split('.').first;
       return url;
-    } catch (_) {
-      return url;
-    }
+    } catch (_) => url;
   }
 
   @override
@@ -165,20 +190,16 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               Icon(Icons.error_outline, color: Colors.white70, size: 48),
               SizedBox(height: 16),
-              Text('加载失败', style: TextStyle(color: Colors.white70, fontSize: 16)),
+              Text('加载失败', style: TextStyle(color: Colors.white70)),
               SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _retry,
-                child: Text('重试'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-              ),
+              ElevatedButton(onPressed: _retry, child: Text('重试')),
             ],
           ),
         ),
       );
     }
 
-    if (_isLoading || _controller == null) {
+    if (_isLoading || !_isInitialized || _controller == null) {
       return Container(
         color: Colors.black,
         child: Center(
@@ -187,7 +208,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               CircularProgressIndicator(color: Colors.white),
               SizedBox(height: 10),
-              Text('加载中...', style: TextStyle(color: Colors.white, fontSize: 16)),
+              Text('加载中...', style: TextStyle(color: Colors.white)),
             ],
           ),
         ),
@@ -196,7 +217,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
     return Stack(
       children: [
-        NiumaPlayer(controller: _controller!),
+        VideoPlayer(_controller!),
         Positioned(
           bottom: 20,
           right: 20,
@@ -220,8 +241,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void dispose() {
     _isDisposed = true;
     _controller?.removeListener(_onControllerListener);
-    _controller?.stop();
     _controller?.dispose();
+    _nextController?.dispose();
     _speedTimer?.cancel();
     _reconnectTimer?.cancel();
     super.dispose();
