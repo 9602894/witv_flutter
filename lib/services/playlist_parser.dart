@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart'; // 引入 IOHttpClientAdapter
 import 'dart:io';
+import 'package:system_proxy/system_proxy.dart'; // 需添加依赖
 import '../models/channel.dart';
 import 'log_service.dart';
 import 'settings_service.dart';
@@ -8,7 +10,8 @@ class PlaylistParser {
   static Future<Map<String, List<Channel>>> parseFromUrl(String url) async {
     await LogService.write('开始解析播放列表: $url');
     try {
-      final response = await Dio().get(url);
+      final dio = await _createDioWithProxy();
+      final response = await dio.get(url);
       final content = response.data as String;
       await LogService.write('下载成功，内容长度: ${content.length}');
       return parseFromString(content);
@@ -18,6 +21,36 @@ class PlaylistParser {
     }
   }
 
+  // 创建支持代理的 Dio 实例
+  static Future<Dio> _createDioWithProxy() async {
+    final dio = Dio();
+    try {
+      // 获取系统代理（Android/iOS）
+      final proxy = await SystemProxy.getProxy();
+      if (proxy != null && proxy.isNotEmpty) {
+        LogService.write('使用系统代理: $proxy');
+        dio.httpClientAdapter = IOHttpClientAdapter(
+          createHttpClient: () {
+            final client = HttpClient();
+            client.findProxy = (uri) => 'PROXY $proxy';
+            // 忽略证书错误（可选，若代理为 MITM 时可避免问题）
+            // client.badCertificateCallback = (cert, host, port) => true;
+            return client;
+          },
+        );
+      } else {
+        LogService.write('未检测到系统代理，使用直连');
+        // 使用默认适配器（直连）
+        dio.httpClientAdapter = IOHttpClientAdapter();
+      }
+    } catch (e) {
+      LogService.write('获取代理失败: $e，使用直连');
+      dio.httpClientAdapter = IOHttpClientAdapter();
+    }
+    return dio;
+  }
+
+  // 以下方法保持不变
   static Map<String, List<Channel>> parseFromString(String content) {
     final lines = content.split('\n');
     final Map<String, List<Channel>> groupMap = {};
