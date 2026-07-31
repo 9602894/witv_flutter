@@ -14,6 +14,27 @@ Map<String, List<EpgProgram>> _parseEpgXmlIsolate(String xmlContent) {
   return EpgParser._parseEpgXml(xmlContent);
 }
 
+// 顶层函数，按频道列表过滤
+Map<String, List<EpgProgram>> _filterEpgIsolate(
+    Map<String, List<EpgProgram>> fullMap, List<String> channelNames) {
+  final result = <String, List<EpgProgram>>{};
+  for (var name in channelNames) {
+    // 精确匹配
+    if (fullMap.containsKey(name)) {
+      result[name] = fullMap[name]!;
+    } else {
+      // 模糊匹配
+      for (var key in fullMap.keys) {
+        if (key.contains(name) || name.contains(key)) {
+          result[name] = fullMap[key]!;
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 class EpgParser {
   static const String epgCacheDirName = 'epgCache';
   static const String hashFileName = 'epg_hash.txt';
@@ -108,7 +129,7 @@ class EpgParser {
 
     final xmlContent = await xmlFile.readAsString();
     try {
-      // 在后台 isolate 解析
+      // 在后台 isolate 解析全量
       _programsCache = await compute(_parseEpgXmlIsolate, xmlContent);
       await LogService.write('EPG 缓存加载成功，频道数: ${_programsCache!.length}');
     } catch (e) {
@@ -189,7 +210,7 @@ class EpgParser {
     return await _checkHashUpdate(url);
   }
 
-  // 获取单个频道 EPG
+  // 获取某个频道的 EPG（按需）
   static Future<List<EpgProgram>> getProgramsForChannel(String channelName) async {
     await _initCache();
     if (_programsCache == null) {
@@ -209,38 +230,20 @@ class EpgParser {
     return [];
   }
 
-  // ★ 批量获取多个频道的 EPG（优先返回已缓存的数据，避免阻塞）
-  static Future<Map<String, List<EpgProgram>>> getProgramsForChannelList(List<String> channelNames) async {
+  // ★ 新方法：获取当前分组频道的 EPG（优先解析）
+  static Future<Map<String, List<EpgProgram>>> getGroupPrograms(
+      List<String> channelNames) async {
     await _initCache();
     if (_programsCache == null) {
-      // 先加载缓存（可能耗时，但只解析一次）
       await _loadCachedEpg();
     }
-    final result = <String, List<EpgProgram>>{};
-    if (_programsCache == null) return result;
+    if (_programsCache == null) return {};
 
-    for (var name in channelNames) {
-      if (_programsCache!.containsKey(name)) {
-        result[name] = _programsCache![name]!;
-      } else {
-        // 模糊匹配
-        bool found = false;
-        for (var key in _programsCache!.keys) {
-          if (key.contains(name) || name.contains(key)) {
-            result[name] = _programsCache![key]!;
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          result[name] = [];
-        }
-      }
-    }
-    return result;
+    // 从全量中过滤出当前分组的频道
+    return _filterEpgIsolate(_programsCache!, channelNames);
   }
 
-  // 获取全量 EPG（后台调用）
+  // 获取全量 EPG（后台静默加载）
   static Future<Map<String, List<EpgProgram>>> getAllPrograms() async {
     await _initCache();
     if (_programsCache == null) {
