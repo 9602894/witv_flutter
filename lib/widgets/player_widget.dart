@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
@@ -30,15 +31,53 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   double _speed = 0;
   bool _isReconnecting = false;
 
+  // 缓存代理状态，避免重复检测
+  static String? _cachedProxyStatus;
+
   @override
   void initState() {
     super.initState();
     _initPlayer(widget.url);
   }
 
+  // 检测代理状态（VPN 或直连）
+  Future<String> _checkProxyStatus() async {
+    if (_cachedProxyStatus != null) return _cachedProxyStatus!;
+    try {
+      // 使用 HttpClient 检测环境代理
+      final client = HttpClient();
+      final proxy = client.findProxy(Uri.parse('http://example.com'));
+      if (proxy != null && proxy.isNotEmpty && proxy != 'DIRECT') {
+        _cachedProxyStatus = 'VPN (代理)';
+      } else {
+        // 额外检查环境变量
+        final httpProxy = Platform.environment['http_proxy'] ??
+                           Platform.environment['HTTP_PROXY'];
+        final httpsProxy = Platform.environment['https_proxy'] ??
+                            Platform.environment['HTTPS_PROXY'];
+        if ((httpProxy != null && httpProxy.isNotEmpty) ||
+            (httpsProxy != null && httpsProxy.isNotEmpty)) {
+          _cachedProxyStatus = 'VPN (环境变量)';
+        } else {
+          _cachedProxyStatus = '直连';
+        }
+      }
+    } catch (e) {
+      LogService.write('代理检测异常: $e');
+      _cachedProxyStatus = '未知 (检测失败)';
+    }
+    return _cachedProxyStatus!;
+  }
+
   void _initPlayer(String url) {
     _currentUrl = url;
     _controller?.dispose();
+    
+    // 记录频道和代理状态
+    _checkProxyStatus().then((status) {
+      LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $status');
+    });
+
     _controller = VideoPlayerController.network(url)
       ..initialize().then((_) {
         if (mounted) {
@@ -58,6 +97,20 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           _attemptReconnect();
         }
       });
+  }
+
+  // 从 URL 中提取频道名（简单处理，仅用于日志）
+  String _extractChannelName(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+      if (segments.isNotEmpty) {
+        return segments.last.split('.').first;
+      }
+      return url;
+    } catch (_) {
+      return url;
+    }
   }
 
   void _startSpeedMonitor() {
@@ -108,12 +161,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized || _controller == null) {
       return Container(color: Colors.transparent);
     }
-    // 全屏填充：使用 FittedBox 将视频拉伸填满整个屏幕，不保留原始比例
     return Stack(
       children: [
         Positioned.fill(
           child: FittedBox(
-            fit: BoxFit.cover, // 裁剪填充，确保覆盖整个屏幕
+            fit: BoxFit.cover,
             child: SizedBox(
               width: _controller!.value.size.width,
               height: _controller!.value.size.height,
