@@ -50,7 +50,7 @@ class LogService {
     }
   }
 
-  // 导出当前日志文件（返回 File?，调用者需处理 null）
+  // 导出当前日志文件（返回 File?）
   static Future<File?> export() async {
     if (_logFile == null || !await _logFile!.exists()) {
       return null;
@@ -58,7 +58,13 @@ class LogService {
     return _logFile;
   }
 
-  // 可选：清理旧日志
+  // 获取日志目录（用于清空）
+  static Future<Directory> getLogDir() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return Directory('${dir.path}/logs');
+  }
+
+  // 清理旧日志（可选）
   static Future<void> cleanOldLogs({int keepCount = 10}) async {
     try {
       if (_logFile == null) return;
