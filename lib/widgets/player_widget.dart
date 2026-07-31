@@ -37,10 +37,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _initPlayer(widget.url);
   }
 
-  /// 检测当前网络是否经过代理/VPN（同步方法）
+  /// 检测当前网络是否经过代理/VPN
   Future<String> _getProxyStatus() async {
     try {
-      // 1. 检查环境变量代理（适用于手动设置 http_proxy）
+      // 1. 检查环境变量代理
       final httpProxy = Platform.environment['http_proxy'] ??
                          Platform.environment['HTTP_PROXY'];
       final httpsProxy = Platform.environment['https_proxy'] ??
@@ -60,14 +60,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       final interfaceNames = interfaces.map((i) => i.name).join(', ');
       LogService.write('检测到的网络接口: $interfaceNames');
 
-      // 常见 VPN 接口名称关键词
+      // 常见 VPN 接口名称关键词（不区分大小写）
       const vpnKeywords = ['tun', 'ppp', 'utun', 'tap', 'wg', 'ipsec'];
       for (var iface in interfaces) {
-        if (!iface.isUp) continue; // 只检测活跃接口
         final name = iface.name.toLowerCase();
         for (var keyword in vpnKeywords) {
           if (name.contains(keyword)) {
-            // 额外记录接口详细信息
+            // 记录接口地址（可选）
             final addresses = iface.addresses.map((a) => a.address).join(', ');
             LogService.write('发现 VPN 接口: ${iface.name} (地址: $addresses)');
             return 'VPN ($keyword 接口)';
@@ -86,7 +85,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _currentUrl = url;
     _controller?.dispose();
 
-    // 检测代理状态（异步）
     final proxyStatus = await _getProxyStatus();
     LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
 
@@ -104,7 +102,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         }
       }).catchError((e) {
         LogService.write('视频初始化失败: $e');
-        // 在错误日志中再次记录网络状态
         _getProxyStatus().then((status) {
           LogService.write('播放失败时网络状态: $status');
         });
