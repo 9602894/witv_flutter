@@ -38,7 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isEditMode = false;
   bool _showRightMenu = false;
 
-  // ---------- 宽度控制 ----------
+  // ---------- 宽度控制（用户提供的默认值） ----------
   double subWeight = 0.2;
   double groupWeight = 0.2;
   double channelWeight = 0.6;
@@ -47,22 +47,20 @@ class _HomeScreenState extends State<HomeScreen> {
   double scheduleChannelWeight = 0.35;
   double scheduleWeight = 0.4;
 
-  // ---------- 按钮偏移 ----------
+  // ---------- 按钮偏移（用户提供的默认值） ----------
   Offset scheduleModeButtonOffset = Offset(714.8865763346365, 7.9911295572917425);
   Offset channelListButtonOffset = Offset(-133.9163004557305, -4.6614786783854925);
 
   double _scheduleButtonInitTop = 0;
   double _channelButtonInitTop = 0;
 
-  Map<String, List<EpgProgram>> epgMap = {}; // 当前显示用的 EPG
-  Map<String, List<EpgProgram>> _fullEpgMap = {}; // 全量 EPG 缓存
+  Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
 
   Map<String, List<Channel>>? _fullGroupMap;
   Timer? _epgUpdateTimer;
-  bool _isFullEpgLoading = false; // 防止重复加载
 
   late File _layoutConfigFile;
 
@@ -72,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
     LogService.write('主页初始化');
     _initLayoutConfigFile();
     _loadLayoutConfig();
-    _init();
+    _init(); // 启动加载
     _initEpgScheduler();
   }
 
@@ -154,7 +152,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ========== EPG 更新调度 ==========
   void _initEpgScheduler() {
+    // 首次启动时检查更新（后台）
     _checkEpgUpdate();
+    // 每6小时检查一次
     _epgUpdateTimer = Timer.periodic(Duration(hours: 6), (timer) {
       _checkEpgUpdate();
     });
@@ -165,60 +165,39 @@ class _HomeScreenState extends State<HomeScreen> {
       final updated = await EpgParser.checkForUpdate();
       if (updated) {
         LogService.write('EPG 已更新，重新加载');
-        // 先加载全量（用于后续过滤）
-        _fullEpgMap = await EpgParser.getAllPrograms();
-        // 然后更新当前分组的 EPG
-        _updateCurrentGroupEpg();
+        await _loadAllEpg();
       }
     } catch (e) {
       LogService.write('EPG 更新检查失败: $e');
     }
   }
 
-  // ★ 更新当前分组的 EPG（优先）
-  void _updateCurrentGroupEpg() {
-    if (channels.isEmpty) return;
-    final channelNames = channels.map((c) => c.name).toList();
-    // 从全量中过滤当前分组
-    final filtered = <String, List<EpgProgram>>{};
-    for (var name in channelNames) {
-      if (_fullEpgMap.containsKey(name)) {
-        filtered[name] = _fullEpgMap[name]!;
-      } else {
-        // 模糊匹配
-        for (var key in _fullEpgMap.keys) {
-          if (key.contains(name) || name.contains(key)) {
-            filtered[name] = _fullEpgMap[key]!;
-            break;
-          }
-        }
-      }
-    }
-    setState(() {
-      epgMap = filtered;
-    });
-    LogService.write('当前分组 EPG 更新完成，频道数: ${filtered.length}');
-  }
-
-  // ★ 后台静默加载全量 EPG
-  Future<void> _loadFullEpgInBackground() async {
-    if (_isFullEpgLoading) return;
-    if (_fullEpgMap.isNotEmpty) return;
-    _isFullEpgLoading = true;
+  // 加载全量 EPG（后台异步，不阻塞 UI）
+  Future<void> _loadAllEpg() async {
     try {
-      LogService.write('后台开始加载全量 EPG');
-      _fullEpgMap = await EpgParser.getAllPrograms();
-      LogService.write('全量 EPG 加载完成，频道数: ${_fullEpgMap.length}');
-      // 加载完成后，更新当前分组
-      _updateCurrentGroupEpg();
+      final all = await EpgParser.getAllPrograms();
+      setState(() {
+        epgMap = all;
+      });
+      LogService.write('全量 EPG 加载完成，频道数: ${all.length}');
     } catch (e) {
-      LogService.write('全量 EPG 加载失败: $e');
-    } finally {
-      _isFullEpgLoading = false;
+      LogService.write('加载全量 EPG 失败: $e');
     }
   }
 
-  // ========== 分组切换 ==========
+  // 单个频道 EPG 加载（异步，不阻塞换台）
+  Future<void> _loadEpgForChannel(Channel channel) async {
+    try {
+      final programs = await EpgParser.getProgramsForChannel(channel.name);
+      setState(() {
+        epgMap[channel.name] = programs;
+      });
+    } catch (e) {
+      LogService.write('加载频道 EPG 失败: $e');
+    }
+  }
+
+  // ========== 分组切换（只切换列表，不换台） ==========
   void _switchToGroup(String groupName) {
     if (_fullGroupMap == null) {
       LogService.write('错误：_fullGroupMap 为空，无法切换分组');
@@ -233,62 +212,85 @@ class _HomeScreenState extends State<HomeScreen> {
       currentGroup = groupName;
       channels = groupChannels;
     });
-    // 立即更新当前分组的 EPG（使用已有的 _fullEpgMap）
-    _updateCurrentGroupEpg();
     LogService.write('切换到分组: $groupName，频道数: ${channels.length}');
   }
 
-  // ========== 加载订阅源数据 ==========
+  // ========== 加载订阅源数据（优先缓存，后台更新） ==========
   Future<void> _loadSubscriptionData(Subscription sub) async {
     try {
       LogService.write('加载订阅源数据: ${sub.name}');
       final url = sub.url;
       final cacheFile = await PlaylistParser.getCacheFile(url, sub.name);
+
       Map<String, List<Channel>> groupMap;
+      // 1. 优先读取缓存（如果有）
       if (await cacheFile.exists()) {
         final content = await cacheFile.readAsString();
         groupMap = PlaylistParser.parseFromString(content);
+        LogService.write('从缓存加载订阅源成功');
+        // 立即更新 UI
+        _applyGroupMap(groupMap, sub.name);
+
+        // 2. 后台静默更新（不阻塞 UI）
+        _updateSubscriptionInBackground(url, sub.name, groupMap);
       } else {
+        // 无缓存，直接下载（同步，但会阻塞，首次启动不可避免）
         groupMap = await PlaylistParser.parseFromUrl(url);
         await PlaylistParser.saveCache(groupMap, url, sub.name);
+        _applyGroupMap(groupMap, sub.name);
       }
-
-      _fullGroupMap = groupMap;
-      setState(() {
-        groups = groupMap.keys.toList();
-        if (groups.isNotEmpty) {
-          if (currentGroup == null || !groups.contains(currentGroup)) {
-            currentGroup = groups.first;
-          }
-          final groupChannels = groupMap[currentGroup]!;
-          channels = groupChannels;
-          if (currentChannel == null && channels.isNotEmpty) {
-            final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
-            if (lastChannel != null) {
-              final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
-              currentChannel = found;
-            } else {
-              currentChannel = channels.first;
-            }
-            _showEpgInfo = true;
-          }
-        }
-        currentSubName = sub.name;
-      });
-
-      // ★ 优先加载当前分组的 EPG（使用已有缓存，不等待全量）
-      // 先从 EpgParser 获取全量（可能会触发解析，但会尽快返回）
-      _fullEpgMap = await EpgParser.getAllPrograms();
-      _updateCurrentGroupEpg();
-
-      // ★ 如果全量尚未加载完，在后台异步加载（实际上 getAllPrograms 已经触发加载）
-      // 我们额外在后台做一个静默加载，确保后续切换分组时已有数据
-      _loadFullEpgInBackground();
-
-      LogService.write('订阅源加载完成，分组数: ${groups.length}，频道数: ${channels.length}');
     } catch (e, stack) {
       LogService.writeCrashLog(e, stack);
     }
+  }
+
+  // 后台更新订阅源
+  Future<void> _updateSubscriptionInBackground(String url, String name, Map<String, List<Channel>> currentMap) async {
+    try {
+      LogService.write('后台静默更新订阅源: $name');
+      final newMap = await PlaylistParser.parseFromUrl(url);
+      // 如果内容有变化，更新缓存并刷新 UI
+      if (newMap.keys.length != currentMap.keys.length ||
+          newMap.values.expand((list) => list).length != currentMap.values.expand((list) => list).length) {
+        await PlaylistParser.saveCache(newMap, url, name);
+        _applyGroupMap(newMap, name);
+        LogService.write('订阅源已更新');
+      } else {
+        LogService.write('订阅源无变化');
+      }
+    } catch (e) {
+      LogService.write('后台更新订阅源失败: $e');
+    }
+  }
+
+  // 应用分组数据到 UI
+  void _applyGroupMap(Map<String, List<Channel>> groupMap, String subName) {
+    _fullGroupMap = groupMap;
+    setState(() {
+      groups = groupMap.keys.toList();
+      if (groups.isNotEmpty) {
+        if (currentGroup == null || !groups.contains(currentGroup)) {
+          currentGroup = groups.first;
+        }
+        final groupChannels = groupMap[currentGroup]!;
+        channels = groupChannels;
+        // 自动选择第一个频道（如果当前没有频道）
+        if (currentChannel == null && channels.isNotEmpty) {
+          final lastChannel = Provider.of<SettingsService>(context, listen: false).getLastChannel();
+          if (lastChannel != null) {
+            final found = channels.firstWhere((ch) => ch.name == lastChannel, orElse: () => channels.first);
+            currentChannel = found;
+          } else {
+            currentChannel = channels.first;
+          }
+          _showEpgInfo = true;
+        }
+      }
+      currentSubName = subName;
+    });
+    // 加载全量 EPG（异步）
+    _loadAllEpg();
+    LogService.write('分组数据应用完成，分组数: ${groups.length}，频道数: ${channels.length}');
   }
 
   // ========== 构建 UI ==========
@@ -444,11 +446,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 channels: channels,
                                 selectedChannel: currentChannel,
                                 onSelect: (ch) {
+                                  // ★ 换台：立即更新当前频道，EPG 异步加载
                                   LogService.write('选择频道: ${ch.name}');
                                   setState(() {
                                     currentChannel = ch;
                                     _showEpgInfo = true;
                                   });
+                                  // 异步加载 EPG，不阻塞播放器
+                                  _loadEpgForChannel(ch);
                                   Provider.of<SettingsService>(context, listen: false)
                                       .saveLastChannel(ch.name);
                                 },
@@ -497,7 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- 节目单模式 ----------
+            // ---------- 节目单模式（三列） ----------
             if (isScheduleMode)
               Positioned(
                 left: 0,
@@ -543,6 +548,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 currentChannel = ch;
                                 _showEpgInfo = true;
                               });
+                              _loadEpgForChannel(ch);
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
                             },
@@ -582,6 +588,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 currentChannel = ch;
                                 _showEpgInfo = true;
                               });
+                              _loadEpgForChannel(ch);
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
                             },
@@ -993,16 +1000,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 数据加载 =====
+  // ===== 数据加载（开机） =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.subscriptions.isEmpty) {
       await _addDefaultSubscription();
     }
+    // 加载当前选中的订阅源（优先缓存）
     final selected = settings.subscriptions.where((s) => s.selected).toList();
     if (selected.isNotEmpty) {
       await _loadSubscriptionData(selected.first);
+    } else {
+      // 如果没有选中的，自动选第一个
+      if (settings.subscriptions.isNotEmpty) {
+        settings.toggleSelected(settings.subscriptions.first);
+        await _loadSubscriptionData(settings.subscriptions.first);
+      }
     }
     _checkSubscriptions();
     setState(() {
