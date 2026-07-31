@@ -32,101 +32,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   bool _isReconnecting = false;
   bool _isLoading = false;
 
-  // 超时计时器
-  Timer? _initTimeoutTimer;
-
   @override
   void initState() {
     super.initState();
     _initPlayer(widget.url);
   }
 
-  @override
-  void didUpdateWidget(PlayerWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
-      _isReconnecting = false;
-      _reconnectAttempts = 0;
-      _isInitialized = false;
-      _initPlayer(widget.url);
-    }
-  }
-
-  void _initPlayer(String url) {
-    _currentUrl = url;
-    // 取消旧超时计时器
-    _initTimeoutTimer?.cancel();
-    // 取消旧控制器
-    _controller?.dispose();
-    _controller = null;
-    _isInitialized = false;
-    _isLoading = true;
-    setState(() {});
-
-    // 设置超时（10秒）
-    _initTimeoutTimer = Timer(Duration(seconds: 10), () {
-      if (!_isInitialized && mounted) {
-        LogService.write('播放器初始化超时: $url');
-        setState(() {
-          _isLoading = false;
-        });
-        widget.onError();
-        _attemptReconnect();
-      }
-    });
-
-    // 延迟一帧，让 UI 先更新
-    Future.microtask(() {
-      _createController(url);
-    });
-  }
-
-  void _createController(String url) async {
-    try {
-      // 检测网络状态（仅日志）
-      final proxyStatus = await _getProxyStatus();
-      LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
-
-      _controller = VideoPlayerController.network(url)
-        ..initialize().then((_) {
-          if (mounted) {
-            // 取消超时计时器
-            _initTimeoutTimer?.cancel();
-            setState(() {
-              _isInitialized = true;
-              _isLoading = false;
-            });
-            _controller!.play();
-            LogService.write('视频初始化成功: $url');
-            _startSpeedMonitor();
-            _reconnectAttempts = 0;
-            _isReconnecting = false;
-          }
-        }).catchError((e) {
-          if (mounted) {
-            _initTimeoutTimer?.cancel();
-            setState(() {
-              _isLoading = false;
-            });
-            LogService.write('视频初始化失败: $e');
-            widget.onError();
-            if (!_isReconnecting) {
-              _attemptReconnect();
-            }
-          }
-        });
-    } catch (e) {
-      if (mounted) {
-        _initTimeoutTimer?.cancel();
-        setState(() {
-          _isLoading = false;
-        });
-        LogService.write('创建控制器异常: $e');
-        widget.onError();
-      }
-    }
-  }
-
+  // 快速检测代理状态，不阻塞 UI
   Future<String> _getProxyStatus() async {
     try {
       final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
@@ -135,7 +47,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           (httpsProxy != null && httpsProxy.isNotEmpty)) {
         return '代理 (环境变量)';
       }
-      final interfaces = await NetworkInterface.list(includeLinkLocal: false);
+      // 只检测前几个接口，快速返回
+      final interfaces = await NetworkInterface.list(includeLinkLocal: false, includeLoopback: false);
       for (var iface in interfaces) {
         if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
           return 'VPN (虚拟接口)';
@@ -145,6 +58,51 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     } catch (e) {
       return '未知';
     }
+  }
+
+  void _initPlayer(String url) {
+    _currentUrl = url;
+    _isLoading = true;
+    setState(() {});
+
+    // 取消旧控制器
+    _controller?.dispose();
+
+    // 异步检测网络（不阻塞）
+    _getProxyStatus().then((status) {
+      LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $status');
+    }).catchError((e) {
+      LogService.write('检测网络状态失败: $e');
+    });
+
+    // 立即创建播放器
+    _createController(url);
+  }
+
+  void _createController(String url) {
+    _controller = VideoPlayerController.network(url)
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {
+            _isInitialized = true;
+            _isLoading = false;
+          });
+          _controller!.play();
+          LogService.write('视频初始化成功: $url');
+          _startSpeedMonitor();
+          _reconnectAttempts = 0;
+          _isReconnecting = false;
+        }
+      }).catchError((e) {
+        LogService.write('视频初始化失败: $e');
+        setState(() {
+          _isLoading = false;
+        });
+        widget.onError();
+        if (!_isReconnecting) {
+          _attemptReconnect();
+        }
+      });
   }
 
   String _extractChannelName(String url) {
@@ -164,7 +122,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
       if (_controller != null && _controller!.value.isInitialized) {
-        // 模拟网速
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() {
           _speed = simulatedSpeed;
@@ -190,6 +147,17 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         _isReconnecting = false;
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(PlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _isReconnecting = false;
+      _reconnectAttempts = 0;
+      _isInitialized = false;
+      _initPlayer(widget.url);
+    }
   }
 
   @override
@@ -246,7 +214,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _controller?.dispose();
     _speedTimer?.cancel();
     _reconnectTimer?.cancel();
-    _initTimeoutTimer?.cancel();
     super.dispose();
   }
 }
