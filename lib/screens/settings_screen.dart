@@ -1,10 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
-import '../services/config_service.dart';
 import '../services/log_service.dart';
 import '../models/subscription.dart';
+import 'dart:io';
 
 class SettingsScreen extends StatefulWidget {
   @override
@@ -12,379 +11,317 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  Map<String, dynamic>? config;
-  bool isLoading = true;
-
-  final List<String> decoderNames = [
-    '系统解码',
-    'IJK硬解',
-    'IJK软解',
-    'EXO硬解',
-    'EXO软解',
-    'MPV硬解',
-    'MPV软解',
-  ];
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _urlController = TextEditingController();
+  bool _isAdding = false;
 
   @override
-  void initState() {
-    super.initState();
-    _loadConfig();
+  void dispose() {
+    _nameController.dispose();
+    _urlController.dispose();
+    super.dispose();
   }
 
-  Future<void> _loadConfig() async {
-    try {
-      final cfg = await ConfigService.getConfig();
-      final inner = cfg['Configuration'] as Map<String, dynamic>?;
-      setState(() {
-        config = inner ?? {};
-        isLoading = false;
-      });
-      await LogService.write('加载配置成功，键数: ${config?.length}');
-    } catch (e) {
-      await LogService.write('加载配置失败: $e');
-      setState(() {
-        config = {};
-        isLoading = false;
-      });
-    }
-  }
+  @override
+  Widget build(BuildContext context) {
+    final settings = Provider.of<SettingsService>(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('设置'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: () {
+              settings.markNeedsRefresh();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('已标记刷新，返回后自动更新')),
+              );
+            },
+          ),
+        ],
+      ),
+      body: ListView(
+        children: [
+          // ---------- 订阅源管理 ----------
+          Card(
+            margin: EdgeInsets.all(8),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('订阅源管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  // 添加订阅源表单
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _nameController,
+                          decoration: InputDecoration(
+                            labelText: '名称',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _urlController,
+                          decoration: InputDecoration(
+                            labelText: 'URL',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _isAdding ? null : _addSubscription,
+                        child: _isAdding ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Text('添加'),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12),
+                  // 订阅源列表
+                  ...settings.subscriptions.map((sub) => ListTile(
+                    leading: Checkbox(
+                      value: sub.selected,
+                      onChanged: (_) {
+                        settings.toggleSelected(sub);
+                      },
+                    ),
+                    title: Text(sub.name),
+                    subtitle: Text(sub.url, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: IconButton(
+                      icon: Icon(Icons.delete, color: Colors.red),
+                      onPressed: () {
+                        _confirmDelete(sub);
+                      },
+                    ),
+                  )).toList(),
+                  if (settings.subscriptions.isEmpty)
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(child: Text('暂无订阅源，请添加')),
+                    ),
+                ],
+              ),
+            ),
+          ),
 
-  Future<void> _saveConfig() async {
-    if (config != null) {
-      final full = {'Configuration': config};
-      await ConfigService.saveConfig(full);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('配置已保存')));
-      await LogService.write('配置已保存');
-    }
-  }
+          // ---------- 解码器选择 ----------
+          Card(
+            margin: EdgeInsets.all(8),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('解码器', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  DropdownButton<int>(
+                    value: settings.decoderIndex,
+                    items: [
+                      DropdownMenuItem(value: 0, child: Text('硬件解码')),
+                      DropdownMenuItem(value: 1, child: Text('软件解码')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) settings.setDecoderIndex(value);
+                    },
+                    isExpanded: true,
+                  ),
+                  SizedBox(height: 8),
+                  Text('当前解码器: ${settings.decoderIndex == 0 ? '硬件' : '软件'}'),
+                ],
+              ),
+            ),
+          ),
 
-  Future<void> _backup() async {
-    await ConfigService.backup();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('配置已备份')));
-    await LogService.write('配置已备份');
-  }
+          // ---------- 自动重连 ----------
+          Card(
+            margin: EdgeInsets.all(8),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Text('断线自动重连', style: TextStyle(fontSize: 18)),
+                  Spacer(),
+                  Switch(
+                    value: settings.autoReconnect,
+                    onChanged: (value) {
+                      settings.setAutoReconnect(value);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
 
-  Future<void> _restore() async {
-    final backups = await ConfigService.getBackupFiles();
-    if (backups.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('没有备份文件')));
-      return;
-    }
-    final selected = await showDialog<File>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('选择备份'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: backups.map((f) => ListTile(
-            title: Text(f.path.split('/').last),
-            onTap: () => Navigator.pop(context, f),
-          )).toList(),
-        ),
+          // ---------- 日志操作 ----------
+          Card(
+            margin: EdgeInsets.all(8),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('日志', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: Icon(Icons.file_download),
+                          label: Text('导出日志'),
+                          onPressed: _exportLog,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: Icon(Icons.delete_forever),
+                          label: Text('清空日志'),
+                          onPressed: _clearLogs,
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ---------- 关于 ----------
+          Card(
+            margin: EdgeInsets.all(8),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('关于', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  ListTile(
+                    leading: Icon(Icons.info),
+                    title: Text('Witv 播放器'),
+                    subtitle: Text('版本 1.0.0\n基于 Flutter 构建'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
-    if (selected != null) {
-      await ConfigService.restoreFromBackup(selected);
-      await _loadConfig();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('配置已恢复')));
-      await LogService.write('配置已恢复');
+  }
+
+  // 添加订阅源
+  Future<void> _addSubscription() async {
+    final name = _nameController.text.trim();
+    final url = _urlController.text.trim();
+    if (name.isEmpty || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('请填写完整信息')),
+      );
+      return;
+    }
+    setState(() => _isAdding = true);
+    try {
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      final exists = settings.subscriptions.any((s) => s.url == url || s.name == name);
+      if (exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('订阅源已存在')),
+        );
+        return;
+      }
+      settings.addSubscription(Subscription(name: name, url: url, selected: true));
+      _nameController.clear();
+      _urlController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已添加订阅: $name')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('添加失败: $e')),
+      );
+    } finally {
+      setState(() => _isAdding = false);
     }
   }
 
+  // 确认删除
+  Future<void> _confirmDelete(Subscription sub) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('确认删除'),
+        content: Text('确定要删除订阅 "${sub.name}" 吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text('删除'), style: TextButton.styleFrom(foregroundColor: Colors.red)),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      final settings = Provider.of<SettingsService>(context, listen: false);
+      settings.removeSubscription(sub);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已删除: ${sub.name}')),
+      );
+    }
+  }
+
+  // 导出日志（已修复 null 安全）
   Future<void> _exportLog() async {
     try {
       final file = await LogService.export();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('日志已导出到: ${file.path}')),
-      );
-      await LogService.write('日志导出成功');
-    } catch (e, stack) {
-      await LogService.writeCrashLog(e, stack);
+      if (file != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('日志文件: ${file.path}')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('暂无日志文件')),
+        );
+      }
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('导出失败: $e')),
       );
     }
   }
 
-  void _markNeedRefresh() {
-    Provider.of<SettingsService>(context, listen: false).markNeedsRefresh();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (isLoading) return Scaffold(body: Center(child: CircularProgressIndicator()));
-    final settings = Provider.of<SettingsService>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('设置'),
-        actions: [
-          IconButton(icon: Icon(Icons.save), onPressed: _saveConfig),
-          IconButton(icon: Icon(Icons.backup), onPressed: _backup),
-          IconButton(icon: Icon(Icons.restore), onPressed: _restore),
-          IconButton(icon: Icon(Icons.file_download), onPressed: _exportLog),
-        ],
-      ),
-      body: ListView(
-        padding: EdgeInsets.all(16),
-        children: [
-          // 配置项
-          ..._buildConfigWidgets(),
-          Divider(),
-          // ========== 播放设置 ==========
-          Text('播放设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ListTile(
-            title: Text('解码方式'),
-            subtitle: Text(decoderNames[settings.decoderIndex]),
-            trailing: IconButton(
-              icon: Icon(Icons.arrow_forward_ios),
-              onPressed: () => _showDecoderDialog(context),
-            ),
-          ),
-          SwitchListTile(
-            title: Text('断线自动重连'),
-            subtitle: Text('断开后1秒自动重试'),
-            value: settings.autoReconnect,
-            onChanged: (value) => settings.setAutoReconnect(value),
-          ),
-          Divider(),
-          // ========== 订阅源管理 ==========
-          Text('订阅源管理', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ...settings.subscriptions.map((sub) => ListTile(
-                title: Text(sub.name),
-                subtitle: Text(sub.url),
-                trailing: Checkbox(
-                  value: sub.selected,
-                  onChanged: (_) {
-                    settings.toggleSelected(sub);
-                    _markNeedRefresh();
-                  },
-                ),
-                onLongPress: () {
-                  settings.removeSubscription(sub);
-                  _markNeedRefresh();
-                },
-              )).toList(),
-          ElevatedButton(
-            onPressed: () => _addSubscriptionDialog(context),
-            child: Text('添加订阅'),
-          ),
-          Divider(),
-          // ========== EPG设置 ==========
-          Text('EPG设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ListTile(
-            title: Text('EPG地址'),
-            subtitle: Text(config!['EPG_URLS'] ?? '未设置'),
-            trailing: IconButton(
-              icon: Icon(Icons.edit),
-              onPressed: () => _editEpgDialog(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDecoderDialog(BuildContext context) {
-    final settings = Provider.of<SettingsService>(context, listen: false);
-    showDialog(
+  // 清空日志
+  Future<void> _clearLogs() async {
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('选择解码方式'),
-        content: Container(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: decoderNames.length,
-            itemBuilder: (context, index) {
-              return RadioListTile<int>(
-                title: Text(decoderNames[index]),
-                value: index,
-                groupValue: settings.decoderIndex,
-                onChanged: (value) {
-                  settings.setDecoderIndex(value!);
-                  Navigator.pop(context);
-                },
-              );
-            },
-          ),
-        ),
+        title: Text('确认清空'),
+        content: Text('将删除所有日志文件，确认吗？'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('取消'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text('清空'), style: TextButton.styleFrom(foregroundColor: Colors.red)),
         ],
       ),
     );
-  }
-
-  // 以下方法与之前相同
-  List<Widget> _buildConfigWidgets() {
-    final widgets = <Widget>[];
-    config!.forEach((key, value) {
-      if (key == 'EPG_URLS') return;
-      if (value == null) return;
-      if (value is! bool && value is! num && value is! String) {
-        widgets.add(ListTile(
-          title: Text(key),
-          subtitle: Text('复杂类型 (${value.runtimeType})，不可编辑'),
-        ));
-        return;
+    if (confirm == true) {
+      try {
+        final dir = await LogService.getLogDir();
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+          await dir.create(recursive: true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('日志已清空')),
+          );
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清空失败: $e')),
+        );
       }
-      Widget widget;
-      if (value is bool) {
-        widget = SwitchListTile(
-          title: Text(key),
-          value: value,
-          onChanged: (newVal) {
-            setState(() {
-              config![key] = newVal;
-            });
-          },
-        );
-      } else if (value is num) {
-        widget = ListTile(
-          title: Text(key),
-          subtitle: Text('$value'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(icon: Icon(Icons.remove), onPressed: () {
-                setState(() {
-                  if (value is int) config![key] = (value - 1).clamp(0, 100);
-                  else config![key] = (value - 0.5).clamp(0.0, 100.0);
-                });
-              }),
-              IconButton(icon: Icon(Icons.add), onPressed: () {
-                setState(() {
-                  if (value is int) config![key] = (value + 1).clamp(0, 100);
-                  else config![key] = (value + 0.5).clamp(0.0, 100.0);
-                });
-              }),
-            ],
-          ),
-        );
-      } else if (value is String) {
-        widget = ListTile(
-          title: Text(key),
-          subtitle: Text(value),
-          trailing: IconButton(
-            icon: Icon(Icons.edit),
-            onPressed: () async {
-              final newVal = await showDialog<String>(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: Text('编辑 $key'),
-                  content: TextField(
-                    controller: TextEditingController(text: value),
-                    decoration: InputDecoration(labelText: key),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
-                    TextButton(
-                      onPressed: () {
-                        final text = (context as dynamic).findAncestorStateOfType<TextField>()?.controller?.text;
-                        Navigator.pop(context, text);
-                      },
-                      child: Text('确定'),
-                    ),
-                  ],
-                ),
-              );
-              if (newVal != null) {
-                setState(() {
-                  config![key] = newVal;
-                });
-              }
-            },
-          ),
-        );
-      } else {
-        widget = ListTile(title: Text('$key: 不支持的类型'));
-      }
-      widgets.add(widget);
-    });
-    return widgets;
-  }
-
-  void _editEpgDialog(BuildContext context) {
-    final current = config!['EPG_URLS'] ?? '';
-    final ctrl = TextEditingController(text: current);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('EPG地址'),
-        content: TextField(controller: ctrl, decoration: InputDecoration(labelText: 'XMLTV URL')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
-          TextButton(
-            onPressed: () {
-              final url = ctrl.text.trim();
-              if (url.isNotEmpty) {
-                setState(() {
-                  config!['EPG_URLS'] = url;
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _addSubscriptionDialog(BuildContext context) {
-    final nameCtrl = TextEditingController();
-    final urlCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('添加订阅'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: InputDecoration(labelText: '名称（如：5c直播）'),
-            ),
-            SizedBox(height: 8),
-            TextField(
-              controller: urlCtrl,
-              decoration: InputDecoration(labelText: 'URL（如：http://xxx.m3u）'),
-            ),
-            SizedBox(height: 8),
-            Text(
-              '提示：添加后自动选中，返回主页生效',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
-          TextButton(
-            onPressed: () {
-              final name = nameCtrl.text.trim();
-              final url = urlCtrl.text.trim();
-              if (name.isNotEmpty && url.isNotEmpty) {
-                final settings = Provider.of<SettingsService>(context, listen: false);
-                settings.addSubscription(Subscription(name: name, url: url, selected: true));
-                _markNeedRefresh();
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('已添加并选中: $name')),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('名称和URL都不能为空')),
-                );
-              }
-            },
-            child: Text('添加'),
-          ),
-        ],
-      ),
-    );
+    }
   }
 }
