@@ -60,10 +60,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
     LogService.write('播放频道 (VLC): ${_extractChannelName(_currentUrl)}');
 
-    // 创建控制器，网络缓存设为 300ms
     _controller = VlcPlayerController.network(
       _currentUrl,
-      hwAcc: HwAcc.full,          // 硬件加速
+      hwAcc: HwAcc.full,
       autoPlay: true,
       options: VlcPlayerOptions(
         advanced: VlcAdvancedOptions([
@@ -110,7 +109,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       setState(() => _isLoading = false);
     }
     if (state.hasError) {
-      LogService.write('VLC 播放错误: ${state.error}');
+      // 使用 errorDescription
+      LogService.write('VLC 播放错误: ${state.errorDescription}');
       if (_reconnectAttempts < maxReconnectAttempts) {
         _reconnectAttempts++;
         Future.delayed(Duration(milliseconds: 500), _initPlayer);
