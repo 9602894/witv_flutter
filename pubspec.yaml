@@ -9,8 +9,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 视频播放（VLC）
-  awesome_video_player: ^1.0.0+2 
+  # 视频播放（官方）
+  video_player: ^2.8.0
 
   # 网络请求
   dio: ^5.4.0
