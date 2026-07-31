@@ -64,19 +64,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late File _layoutConfigFile;
 
-  // ========== 工具函数：北京时间 ==========
-  /// 获取当前 UTC 时间
-  DateTime _getUtcNow() => DateTime.now().toUtc();
-
-  /// 将 UTC 时间格式化为北京时间（+8）的 HH:mm
-  String _formatBeijingTime(DateTime utcTime) {
-    final beijing = utcTime.add(Duration(hours: 8));
-    return '${beijing.hour.toString().padLeft(2, '0')}:${beijing.minute.toString().padLeft(2, '0')}';
-  }
-
-  /// 获取当前正在播放的节目（基于 UTC 比较）
+  // ========== 工具函数：获取当前节目和下一节目（基于北京时间，即本地时间） ==========
+  /// 获取当前正在播放的节目（EPG 时间已是北京时间）
   EpgProgram? _getCurrentProgram(List<EpgProgram> programs) {
-    final now = _getUtcNow();
+    final now = DateTime.now(); // 设备本地时间（北京时间）
     for (var p in programs) {
       if (p.start.isBefore(now) && p.end.isAfter(now)) {
         return p;
@@ -87,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 获取下一个即将播放的节目
   EpgProgram? _getNextProgram(List<EpgProgram> programs) {
-    final now = _getUtcNow();
+    final now = DateTime.now();
     EpgProgram? current = _getCurrentProgram(programs);
     if (current == null) {
       for (var p in programs) {
@@ -660,7 +651,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- EPG 信息浮窗（修复：动态获取当前/下一节目） ----------
+            // ---------- EPG 信息浮窗（已修复：动态显示当前/下一节目） ----------
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -819,9 +810,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(children: children);
   }
 
-  // ========== EPG 信息项（已格式化北京时间） ==========
+  // ========== EPG 信息项 ==========
   Widget _buildEpgItem(EpgProgram prog, String label) {
-    final timeStr = '${_formatBeijingTime(prog.start)}-${_formatBeijingTime(prog.end)}';
+    final timeStr = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
