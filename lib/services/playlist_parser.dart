@@ -1,7 +1,5 @@
 import 'package:dio/dio.dart';
 import 'dart:io';
-import 'dart:convert';
-import 'package:crypto/crypto.dart';
 import '../models/channel.dart';
 import 'log_service.dart';
 import 'settings_service.dart';
@@ -59,11 +57,10 @@ class PlaylistParser {
     return groupMap;
   }
 
-  // ★ 关键修改：根据 URL 生成固定缓存文件名（不添加时间戳）
+  // 使用 URL 的 hashCode 生成固定文件名（不添加时间戳，无额外依赖）
   static Future<File> getCacheFile(String url, String name) async {
     final cacheDir = await SettingsService.getCacheDir();
-    // 使用 URL 的 MD5 哈希作为文件名，确保唯一且固定
-    final hash = md5.convert(utf8.encode(url)).toString();
+    final hash = url.hashCode.toRadixString(16).padLeft(8, '0');
     final extension = _getExtension(url);
     final fileName = 'playlist_$hash.$extension';
     return File('${cacheDir.path}/$fileName');
@@ -75,17 +72,16 @@ class PlaylistParser {
     if (ext == 'm3u' || ext == 'm3u8' || ext == 'txt') {
       return ext;
     }
-    return 'm3u'; // 默认
+    return 'm3u';
   }
 
-  // ★ 关键修改：直接覆盖写入，不保留多个旧缓存
+  // 直接覆盖写入同一个文件，每次更新内容
   static Future<void> saveCache(Map<String, List<Channel>> groupMap, String url, String name) async {
     final file = await getCacheFile(url, name);
     final content = _serializeToM3U(groupMap);
     await file.writeAsString(content);
     await LogService.write('缓存已保存: ${file.path}');
-    // 不再清理旧缓存（因为每次覆盖同一文件，无需额外操作）
-    // 可选：可删除此部分，或保留但无需执行
+    // 无需清理旧缓存，因为只有一个文件
   }
 
   static String _serializeToM3U(Map<String, List<Channel>> groupMap) {
