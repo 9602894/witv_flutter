@@ -32,8 +32,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   Timer? _speedTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 999; // 无限重试
-  static const int initTimeoutMs = 15000; // 15 秒超时（适应慢速服务器）
+
+  static const int maxReconnectAttempts = 5;
+  static const int initTimeoutMs = 8000;
   static const int retryBaseDelayMs = 1000;
   static const int retryMaxDelayMs = 10000;
 
@@ -69,7 +70,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   Future<void> _preloadPlayer() async {
     if (_isDisposed) return;
+
     LogService.write('预加载频道: ${_extractChannelName(_currentUrl)}');
+
     final oldPreload = _nextController;
     _nextController = null;
 
@@ -78,13 +81,16 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         _currentUrl,
         formatHint: _detectFormat(_currentUrl),
       );
+
       await _nextController!.initialize().timeout(
         const Duration(milliseconds: initTimeoutMs),
       );
+
       if (_isDisposed) {
         await _nextController?.dispose();
         return;
       }
+
       LogService.write('预加载成功: $_currentUrl');
       _swapController();
     } catch (e) {
@@ -99,6 +105,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _swapController() {
     if (_nextController == null || _isDisposed) return;
+
     final oldController = _controller;
     oldController?.removeListener(_onControllerListener);
 
@@ -126,6 +133,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
+
     final oldController = _controller;
     _controller = null;
     _isInitialized = false;
@@ -148,13 +156,16 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         _currentUrl,
         formatHint: _detectFormat(_currentUrl),
       );
+
       await _controller!.initialize().timeout(
         const Duration(milliseconds: initTimeoutMs),
       );
+
       if (_isDisposed) {
         await _controller?.dispose();
         return;
       }
+
       _isInitialized = true;
       _isLoading = false;
       if (mounted) setState(() {});
@@ -166,7 +177,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       if (_isDisposed) return;
       LogService.write('直接加载失败: $e');
       _isLoading = false;
-      _isFailed = false; // 不设置为 true，允许重试
+      _isFailed = true;
       if (mounted) setState(() {});
       widget.onError();
       _scheduleReconnect();
@@ -175,16 +186,19 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _scheduleReconnect() {
     if (_reconnectAttempts >= maxReconnectAttempts) {
-      // 但 maxReconnectAttempts 很大，所以不会执行到这里
       if (mounted) setState(() => _isFailed = true);
+      LogService.write('重试次数已达上限');
       return;
     }
+
     _reconnectTimer?.cancel();
     final delay = min(
       retryBaseDelayMs * pow(2, _reconnectAttempts).toInt(),
       retryMaxDelayMs,
     );
+
     LogService.write('计划 ${delay}ms 后第 ${_reconnectAttempts + 1} 次重试');
+
     _reconnectTimer = Timer(Duration(milliseconds: delay), () {
       if (_isDisposed) return;
       _reconnectAttempts++;
@@ -194,11 +208,14 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _onControllerListener() {
     if (_controller == null || _isDisposed) return;
+
     final value = _controller!.value;
+
     if (value.hasError) {
       LogService.write('播放错误: ${value.errorDescription}');
       _controller!.removeListener(_onControllerListener);
       _controller!.pause();
+
       if (_reconnectAttempts < maxReconnectAttempts) {
         _scheduleReconnect();
       } else {
@@ -206,8 +223,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       }
       return;
     }
+
     if (value.isBuffering && value.isPlaying) {
-      // 缓冲中，不处理
+      LogService.write('检测到缓冲...');
     }
   }
 
@@ -221,31 +239,44 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _speedTimer?.cancel();
     _lastUpdateTime = DateTime.now().millisecondsSinceEpoch;
     _lastPosition = _controller?.value.position.inMilliseconds ?? 0;
+
     _speedTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      if (_controller == null || !_controller!.value.isInitialized || _isDisposed) return;
+      if (_controller == null || !_controller!.value.isInitialized || _isDisposed) {
+        return;
+      }
+
       final now = DateTime.now().millisecondsSinceEpoch;
       final currentPos = _controller!.value.position.inMilliseconds;
       final timeDiff = (now - _lastUpdateTime) / 1000.0;
+
       if (timeDiff > 0) {
         final posDiff = (currentPos - _lastPosition) / 1000.0;
         final actualSpeed = posDiff / timeDiff;
         final displaySpeed = (actualSpeed * 0.8).clamp(0.1, 50.0);
+
         _speed = displaySpeed;
         _lastUpdateTime = now;
         _lastPosition = currentPos;
+
         widget.onSpeedUpdate(displaySpeed);
-        if (mounted && !_isLoading && !_isFailed) setState(() {});
+
+        if (mounted && !_isLoading && !_isFailed) {
+          setState(() {});
+        }
       }
     });
   }
 
+  // ★ 修正：将 `} catch (_) => url;` 改为完整函数体
   String _extractChannelName(String url) {
     try {
       final uri = Uri.parse(url);
       final segments = uri.pathSegments;
       if (segments.isNotEmpty) return segments.last.split('.').first;
       return url;
-    } catch (_) => url;
+    } catch (_) {
+      return url; // 捕获异常后返回原 URL
+    }
   }
 
   @override
