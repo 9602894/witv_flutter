@@ -42,18 +42,14 @@ class EpgParser {
     return md5.convert(utf8.encode(content)).toString();
   }
 
-  // 下载哈希文件并比对（EPG 专用）
+  // 下载哈希文件并比对，如果有更新则下载新 XML 并删除旧文件
   static Future<bool> _checkHashUpdate(String epgUrl) async {
     try {
       final hashUrl = '$epgUrl.hash';
-      await LogService.write('检查 EPG 哈希: $hashUrl');
       final response = await Dio().get(hashUrl);
       final remoteHash = response.data.toString().trim();
-      
-      if (remoteHash.isEmpty) {
-        await LogService.write('远程哈希为空，跳过更新');
-        return false;
-      }
+
+      if (remoteHash.isEmpty) return false;
 
       // 读取本地哈希
       final hashFile = File('${_cacheDir!.path}/$hashFileName');
@@ -64,8 +60,6 @@ class EpgParser {
 
       // 如果哈希不同，需要更新
       if (localHash != remoteHash) {
-        await LogService.write('EPG 哈希变化: 本地 $localHash -> 远程 $remoteHash');
-        
         // 删除旧文件
         if (await hashFile.exists()) {
           final oldHash = localHash;
@@ -78,25 +72,24 @@ class EpgParser {
         }
 
         // 下载新 XML
-        await LogService.write('开始下载新 EPG: $epgUrl');
         final xmlResponse = await Dio().get(epgUrl);
         final xmlContent = xmlResponse.data as String;
         final newHash = _computeHash(xmlContent);
-        
+
         // 保存新文件
         final newXmlFile = File('${_cacheDir!.path}/epg_$newHash.xml');
         await newXmlFile.writeAsString(xmlContent);
         await hashFile.writeAsString(newHash);
         await LogService.write('EPG 更新完成，新哈希: $newHash');
-        
+
         _programsCache = null; // 清空内存缓存
         return true;
       }
-      
+
       await LogService.write('EPG 哈希未变化，无需更新');
       return false;
     } catch (e) {
-      await LogService.write('EPG 哈希检查失败: $e，使用本地缓存');
+      await LogService.write('EPG 哈希检查失败: $e');
       return false;
     }
   }
@@ -105,22 +98,20 @@ class EpgParser {
   static Future<void> _loadCachedEpg() async {
     if (_programsCache != null) return;
     await _initCache();
-    
+
     final hashFile = File('${_cacheDir!.path}/$hashFileName');
     if (!await hashFile.exists()) {
-      await LogService.write('本地无 EPG 缓存');
       _programsCache = {};
       return;
     }
-    
+
     final hash = await hashFile.readAsString();
     final xmlFile = File('${_cacheDir!.path}/epg_$hash.xml');
     if (!await xmlFile.exists()) {
-      await LogService.write('EPG XML 文件不存在，可能已被删除');
       _programsCache = {};
       return;
     }
-    
+
     final xmlContent = await xmlFile.readAsString();
     try {
       _programsCache = _parseEpgXml(xmlContent);
@@ -135,13 +126,13 @@ class EpgParser {
   static Map<String, List<EpgProgram>> _parseEpgXml(String xmlContent) {
     final document = XmlDocument.parse(xmlContent);
     final programs = <String, List<EpgProgram>>{};
-    
+
     // 建立频道 ID -> 名称映射
     final channelMap = <String, String>{};
     for (var channel in document.findAllElements('channel')) {
       final id = channel.getAttribute('id');
       final displayName = channel.findElements('display-name').firstOrNull?.text ?? id;
-      if (id != null && displayName != null && displayName.isNotEmpty) {
+      if (id != null && displayName != null) {
         channelMap[id] = displayName;
       }
     }
@@ -150,7 +141,7 @@ class EpgParser {
     for (var programme in document.findAllElements('programme')) {
       final channelId = programme.getAttribute('channel');
       if (channelId == null) continue;
-      
+
       final channelName = channelMap[channelId];
       if (channelName == null) continue;
 
@@ -185,7 +176,6 @@ class EpgParser {
 
   static DateTime? _parseDateTime(String str) {
     try {
-      // 格式：20260731113000 +0800 或 20260731113000
       String dateStr = str.substring(0, 14);
       int year = int.parse(dateStr.substring(0, 4));
       int month = int.parse(dateStr.substring(4, 6));
@@ -205,10 +195,7 @@ class EpgParser {
   static Future<bool> checkForUpdate() async {
     await _initCache();
     final url = await _getEpgUrl();
-    if (url == null) {
-      await LogService.write('未配置 EPG URL');
-      return false;
-    }
+    if (url == null) return false;
     return await _checkHashUpdate(url);
   }
 
