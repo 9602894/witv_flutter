@@ -1,28 +1,3 @@
-import 'dart:async';
-import 'dart:io';
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:path_provider/path_provider.dart';
-import '../services/settings_service.dart';
-import '../services/config_service.dart';
-import '../services/playlist_parser.dart';
-import '../services/epg_parser.dart';
-import '../services/log_service.dart';
-import '../models/channel.dart';
-import '../models/epg_program.dart';
-import '../models/subscription.dart';
-import '../widgets/player_widget.dart';
-import '../widgets/channel_list.dart';
-import '../widgets/group_list.dart';
-import '../widgets/schedule_view.dart';
-import 'settings_screen.dart';
-
-class HomeScreen extends StatefulWidget {
-  @override
-  _HomeScreenState createState() => _HomeScreenState();
-}
-
 class _HomeScreenState extends State<HomeScreen> {
   // ---------- 数据 ----------
   List<Channel> channels = [];
@@ -170,9 +145,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ========== 加载 EPG 并排序 ==========
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
+      // 对每个频道的节目按开始时间排序
+      all.forEach((key, list) {
+        list.sort((a, b) => a.start.compareTo(b.start));
+      });
       setState(() {
         epgMap = all;
       });
@@ -185,12 +165,58 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
+      programs.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
         epgMap[channel.name] = programs;
       });
     } catch (e) {
       LogService.write('加载频道 EPG 失败: $e');
     }
+  }
+
+  // ========== 辅助方法：获取当前和下一个节目 ==========
+  (EpgProgram?, EpgProgram?) _getCurrentAndNextPrograms(List<EpgProgram> programs) {
+    final now = DateTime.now();
+    // 确保已排序（外部已排序）
+    for (int i = 0; i < programs.length; i++) {
+      final p = programs[i];
+      if (p.start.isBefore(now) && p.end.isAfter(now)) {
+        final next = (i + 1 < programs.length) ? programs[i + 1] : null;
+        return (p, next);
+      }
+    }
+    return (null, null);
+  }
+
+  // ========== 为 ChannelList 调整 EPG 数据（当前节目移到首位） ==========
+  Map<String, List<EpgProgram>> _buildEpgMapForChannelList() {
+    final now = DateTime.now();
+    Map<String, List<EpgProgram>> result = {};
+    epgMap.forEach((key, programs) {
+      if (programs.isEmpty) {
+        result[key] = [];
+        return;
+      }
+      // 复制排序（原数据已排序，但以防万一）
+      List<EpgProgram> sorted = List.from(programs)..sort((a, b) => a.start.compareTo(b.start));
+      int currentIndex = -1;
+      for (int i = 0; i < sorted.length; i++) {
+        if (sorted[i].start.isBefore(now) && sorted[i].end.isAfter(now)) {
+          currentIndex = i;
+          break;
+        }
+      }
+      if (currentIndex != -1) {
+        // 将当前节目移到第一位
+        List<EpgProgram> reordered = [];
+        reordered.add(sorted[currentIndex]);
+        reordered.addAll(sorted.where((p) => p != sorted[currentIndex]));
+        result[key] = reordered;
+      } else {
+        result[key] = sorted;
+      }
+    });
+    return result;
   }
 
   // ========== 分组切换 ==========
@@ -441,7 +467,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   Provider.of<SettingsService>(context, listen: false)
                                       .saveLastChannel(ch.name);
                                 },
-                                epgMap: epgMap,
+                                epgMap: _buildEpgMapForChannelList(),  // 使用调整后的数据
                                 showChannelNumber: false,
                                 showLogo: true,
                               ),
@@ -536,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
                             },
-                            epgMap: epgMap,
+                            epgMap: _buildEpgMapForChannelList(),  // 使用调整后的数据
                             showChannelNumber: false,
                             showLogo: true,
                           ),
@@ -566,7 +592,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: ScheduleView(
                             channels: channels,
                             selectedChannel: currentChannel,
-                            epgMap: epgMap,
+                            epgMap: epgMap,  // 使用原始排序数据，内部会高亮当前
                             onSelectChannel: (ch) {
                               setState(() {
                                 currentChannel = ch;
@@ -621,7 +647,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- EPG 信息浮窗（已移除点击空白关闭手势） ----------
+            // ---------- EPG 信息浮窗（修正） ----------
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -645,10 +671,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         SizedBox(height: 8),
                         if (epgMap.containsKey(currentChannel!.name) && epgMap[currentChannel!.name]!.isNotEmpty) ...[
-                          _buildEpgItem(epgMap[currentChannel!.name]![0], '当前节目'),
-                          SizedBox(height: 4),
-                          if (epgMap[currentChannel!.name]!.length > 1)
-                            _buildEpgItem(epgMap[currentChannel!.name]![1], '下一节目'),
+                          final (current, next) = _getCurrentAndNextPrograms(epgMap[currentChannel!.name]!);
+                          if (current != null) ...[
+                            _buildEpgItem(current, '当前节目'),
+                            SizedBox(height: 4),
+                            if (next != null) _buildEpgItem(next, '下一节目'),
+                          ] else
+                            Text('暂无当前节目', style: TextStyle(color: Colors.white70)),
                         ] else
                           Text('暂无EPG信息', style: TextStyle(color: Colors.white70)),
                       ],
