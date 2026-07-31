@@ -37,25 +37,20 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _initPlayer(widget.url);
   }
 
-  // 检测代理状态（仅用于日志）
+  // 检测代理状态（仅用于日志，不影响网络）
   Future<String> _getProxyStatus() async {
     try {
-      // 检测环境变量
+      // 1. 检测环境变量
       final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
       final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
       if ((httpProxy != null && httpProxy.isNotEmpty) || (httpsProxy != null && httpsProxy.isNotEmpty)) {
         return '代理 (环境变量)';
       }
-      // 尝试从 HttpClient 获取
-      final client = HttpClient();
-      final proxy = client.findProxyFromEnvironment(Uri.parse('http://example.com'));
-      if (proxy != null && proxy.isNotEmpty && proxy != 'DIRECT') {
-        return '代理 (findProxy)';
-      }
-      // 检测 VPN 接口（简单判断）
+      // 2. 检测 VPN 虚拟接口
       final interfaces = await NetworkInterface.list(includeLinkLocal: false);
       for (var iface in interfaces) {
-        if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
+        final name = iface.name.toLowerCase();
+        if (name.contains('tun') || name.contains('ppp') || name.contains('utun') || name.contains('vpn')) {
           return 'VPN (虚拟接口)';
         }
       }
