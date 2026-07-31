@@ -9,8 +9,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 视频播放
- flutter_vlc_player: ^7.4.9   # 最新稳定版
+  # 视频播放（VLC）
+  flutter_vlc_player: ^7.4.9
 
   # 网络请求
   dio: ^5.4.0
@@ -30,7 +30,7 @@ dependencies:
   # 文件路径
   path_provider: ^2.1.2
 
-  # SVG 图标
+  # SVG 图标（可选）
   flutter_svg: ^2.0.9
 
   # MD5 哈希计算（EPG 校验用）
