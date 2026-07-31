@@ -17,7 +17,7 @@ class LogService {
       }
       final fileName = 'app_$timestamp.log';
       _logFile = File('${logDir.path}/$fileName');
-      await _logFile!.create(recursive: true); // 使用 ! 确保非空
+      await _logFile!.create(recursive: true);
       await write('=== 应用启动 ===');
       _initialized = true;
     } catch (e) {
@@ -50,13 +50,15 @@ class LogService {
     }
   }
 
-  // 导出日志文件（供设置界面使用）
+  // 导出当前日志文件（返回 File?，调用者需处理 null）
   static Future<File?> export() async {
-    if (_logFile == null) await init();
+    if (_logFile == null || !await _logFile!.exists()) {
+      return null;
+    }
     return _logFile;
   }
 
-  // 可选清理旧日志
+  // 可选：清理旧日志
   static Future<void> cleanOldLogs({int keepCount = 10}) async {
     try {
       if (_logFile == null) return;
