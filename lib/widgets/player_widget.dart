@@ -27,9 +27,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   bool _isDisposed = false;
   String _currentUrl = '';
   Timer? _speedTimer;
-  Timer? _reconnectTimer; // 定义重连定时器
+  Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 3;
+  static const int maxReconnectAttempts = 5;
+  static const int initTimeoutSeconds = 2; // ★ 2秒超时
   double _speed = 0;
   bool _isReconnecting = false;
 
@@ -47,28 +48,30 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
       _isReconnecting = false;
-      _reconnectTimer?.cancel(); // 取消旧定时器
       _initPlayer();
     }
   }
 
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
-    // 取消旧控制器
+    // 彻底清理旧控制器
     _controller?.removeListener(_onControllerListener);
     await _controller?.dispose();
     _controller = null;
     _isInitialized = false;
+    _isReconnecting = false;
     setState(() => _isLoading = true);
 
-    // 检测网络状态（日志）
     final proxyStatus = await _getProxyStatus();
     LogService.write('播放频道: ${_extractChannelName(_currentUrl)}，网络状态: $proxyStatus');
 
+    // 创建新控制器
+    _controller = VideoPlayerController.network(_currentUrl);
+    _controller!.addListener(_onControllerListener);
+
+    // 带超时的初始化
     try {
-      _controller = VideoPlayerController.network(_currentUrl);
-      _controller!.addListener(_onControllerListener);
-      await _controller!.initialize().timeout(Duration(seconds: 10));
+      await _controller!.initialize().timeout(Duration(seconds: initTimeoutSeconds));
       if (_isDisposed) return;
       if (mounted) {
         setState(() {
@@ -83,20 +86,34 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       }
     } catch (e) {
       if (_isDisposed) return;
-      LogService.write('视频初始化失败: $e');
+      LogService.write('视频初始化失败: $e (尝试 ${_reconnectAttempts+1}/$maxReconnectAttempts)');
       setState(() => _isLoading = false);
       widget.onError();
-      if (!_isReconnecting && _reconnectAttempts < maxReconnectAttempts) {
-        _attemptReconnect();
+      if (_reconnectAttempts < maxReconnectAttempts && !_isReconnecting) {
+        _scheduleReconnect();
       }
     }
   }
 
+  void _scheduleReconnect() {
+    if (_isReconnecting) return;
+    _isReconnecting = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(Duration(milliseconds: 500), () { // ★ 500ms后重试
+      if (_isDisposed) return;
+      _reconnectAttempts++;
+      _isReconnecting = false;
+      _initPlayer();
+    });
+  }
+
   void _onControllerListener() {
-    if (_controller == null) return;
+    if (_controller == null || _isDisposed) return;
     if (_controller!.value.hasError) {
       LogService.write('播放器错误: ${_controller!.value.errorDescription}');
-      if (!_isReconnecting) _attemptReconnect();
+      if (!_isReconnecting && _reconnectAttempts < maxReconnectAttempts) {
+        _scheduleReconnect();
+      }
     }
   }
 
@@ -104,8 +121,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     try {
       final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
       final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
-      if ((httpProxy != null && httpProxy.isNotEmpty) ||
-          (httpsProxy != null && httpsProxy.isNotEmpty)) {
+      if ((httpProxy != null && httpProxy.isNotEmpty) || (httpsProxy != null && httpsProxy.isNotEmpty)) {
         return '代理 (环境变量)';
       }
       final interfaces = await NetworkInterface.list(includeLinkLocal: false);
@@ -142,24 +158,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           _speed = simulatedSpeed;
           widget.onSpeedUpdate(simulatedSpeed);
         });
-      }
-    });
-  }
-
-  void _attemptReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts || _isReconnecting || _isDisposed) {
-      LogService.write('重连次数过多或正在重连，停止');
-      return;
-    }
-    _isReconnecting = true;
-    _reconnectAttempts++;
-    LogService.write('尝试重连，第 $_reconnectAttempts 次');
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(seconds: 2), () {
-      if (mounted && !_isDisposed && !_isInitialized) {
-        _initPlayer();
-      } else {
-        _isReconnecting = false;
       }
     });
   }
