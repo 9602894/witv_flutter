@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:awesome_video_player/awesome_video_player.dart';
+import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
 
 class PlayerWidget extends StatefulWidget {
@@ -20,13 +20,15 @@ class PlayerWidget extends StatefulWidget {
 }
 
 class _PlayerWidgetState extends State<PlayerWidget> {
-  AwesomeVideoPlayerController? _controller;
+  VideoPlayerController? _controller;
+  VideoPlayerController? _nextController; // 预加载控制器
   bool _isInitialized = false;
   bool _isLoading = true;
   bool _isFailed = false;
   bool _isDisposed = false;
   String _currentUrl = '';
   Timer? _speedTimer;
+  Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int maxReconnectAttempts = 3;
   double _speed = 0;
@@ -44,13 +46,61 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (oldWidget.url != widget.url && !_isDisposed) {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
+      _isFailed = false;
+      _preloadPlayer(); // 预加载新URL
+    }
+  }
+
+  // 预加载新播放器（不切换，仅准备）
+  Future<void> _preloadPlayer() async {
+    if (_isDisposed) return;
+    _isLoading = true;
+    setState(() {});
+
+    // 如果已有预加载控制器，先清理
+    await _nextController?.dispose();
+    _nextController = null;
+
+    LogService.write('预加载频道: ${_extractChannelName(_currentUrl)}');
+
+    try {
+      _nextController = VideoPlayerController.network(_currentUrl);
+      await _nextController!.initialize().timeout(Duration(seconds: 2));
+      if (_isDisposed) return;
+      LogService.write('预加载成功: $_currentUrl');
+      // 预加载成功，立即切换
+      _swapController();
+    } catch (e) {
+      LogService.write('预加载失败: $e，尝试直接加载');
+      // 预加载失败，回退到直接加载
       _initPlayer();
     }
   }
 
+  // 交换控制器（无缝切换）
+  void _swapController() {
+    if (_nextController == null || _isDisposed) return;
+    // 移除旧监听
+    _controller?.removeListener(_onControllerListener);
+    // 停止并释放旧控制器（但保留最后画面）
+    _controller?.pause();
+    // 交换
+    _controller = _nextController;
+    _nextController = null;
+    _isInitialized = true;
+    _isLoading = false;
+    _isFailed = false;
+    _controller!.addListener(_onControllerListener);
+    _controller!.play();
+    setState(() {});
+    _startSpeedMonitor();
+    _reconnectAttempts = 0;
+    LogService.write('切换完成: $_currentUrl');
+  }
+
+  // 直接加载（无预加载时使用）
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
-    await _controller?.stop();
     await _controller?.dispose();
     _controller = null;
     _isInitialized = false;
@@ -58,54 +108,51 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _isFailed = false;
     setState(() {});
 
-    LogService.write('播放频道 (Awesome): ${_extractChannelName(_currentUrl)}');
-
-    _controller = AwesomeVideoPlayerController.network(
-      _currentUrl,
-      autoPlay: true,
-      // 可选：设置缓存大小（毫秒），类似酷9的 analyzeduration
-      // cacheSize: 500, // 默认 1500ms
-    );
-
-    _controller!.addListener(_onControllerListener);
+    LogService.write('直接加载频道: ${_extractChannelName(_currentUrl)}');
 
     try {
+      _controller = VideoPlayerController.network(_currentUrl);
       await _controller!.initialize().timeout(Duration(seconds: 3));
       if (_isDisposed) return;
       setState(() {
         _isInitialized = true;
         _isLoading = false;
       });
-      await _controller!.play();
-      LogService.write('Awesome 初始化成功: $_currentUrl');
+      _controller!.play();
+      LogService.write('直接加载成功: $_currentUrl');
       _startSpeedMonitor();
       _reconnectAttempts = 0;
     } catch (e) {
       if (_isDisposed) return;
-      LogService.write('Awesome 初始化失败: $e');
+      LogService.write('直接加载失败: $e');
       setState(() {
         _isLoading = false;
         _isFailed = true;
       });
       widget.onError();
-      if (_reconnectAttempts < maxReconnectAttempts) {
-        _reconnectAttempts++;
-        Future.delayed(Duration(milliseconds: 500), _initPlayer);
-      }
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= maxReconnectAttempts) {
+      setState(() => _isFailed = true);
+      return;
+    }
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(Duration(milliseconds: 500), () {
+      if (_isDisposed) return;
+      _reconnectAttempts++;
+      _initPlayer();
+    });
   }
 
   void _onControllerListener() {
     if (_controller == null || _isDisposed) return;
-    final state = _controller!.value;
-    if (state.isPlaying) {
-      setState(() => _isLoading = false);
-    }
-    if (state.hasError) {
-      LogService.write('Awesome 播放错误: ${state.errorDescription}');
+    if (_controller!.value.hasError) {
+      LogService.write('播放错误: ${_controller!.value.errorDescription}');
       if (_reconnectAttempts < maxReconnectAttempts) {
-        _reconnectAttempts++;
-        Future.delayed(Duration(milliseconds: 500), _initPlayer);
+        _scheduleReconnect();
       } else {
         setState(() => _isFailed = true);
       }
@@ -114,13 +161,14 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _retry() {
     _reconnectAttempts = 0;
+    _isFailed = false;
     _initPlayer();
   }
 
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      if (_controller != null && _controller!.value.isPlaying) {
+      if (_controller != null && _controller!.value.isInitialized) {
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() => _speed = simulatedSpeed);
         widget.onSpeedUpdate(simulatedSpeed);
@@ -132,13 +180,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     try {
       final uri = Uri.parse(url);
       final segments = uri.pathSegments;
-      if (segments.isNotEmpty) {
-        return segments.last.split('.').first;
-      }
+      if (segments.isNotEmpty) return segments.last.split('.').first;
       return url;
-    } catch (_) {
-      return url;
-    }
+    } catch (_) => url;
   }
 
   @override
@@ -161,7 +205,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       );
     }
 
-    if (_isLoading || _controller == null) {
+    if (_isLoading || !_isInitialized || _controller == null) {
       return Container(
         color: Colors.black,
         child: Center(
@@ -179,7 +223,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
     return Stack(
       children: [
-        AwesomeVideoPlayer(controller: _controller!),
+        VideoPlayer(_controller!),
         Positioned(
           bottom: 20,
           right: 20,
@@ -203,9 +247,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void dispose() {
     _isDisposed = true;
     _controller?.removeListener(_onControllerListener);
-    _controller?.stop();
     _controller?.dispose();
+    _nextController?.dispose();
     _speedTimer?.cancel();
+    _reconnectTimer?.cancel();
     super.dispose();
   }
 }
