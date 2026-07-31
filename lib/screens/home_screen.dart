@@ -220,9 +220,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 showLogo: true,
                               ),
                             ),
-                            // 竖排“节目单”按钮（置于频道列表右侧，稍微靠左）
+                            // 竖排“节目单”按钮（向右移，更靠左）
                             Positioned(
-                              right: 4, // 靠右但留出间距
+                              right: 20, // 调整此值控制按钮左右位置
                               top: 0,
                               bottom: 0,
                               child: GestureDetector(
@@ -261,127 +261,129 @@ class _HomeScreenState extends State<HomeScreen> {
                 top: 0,
                 bottom: 0,
                 width: MediaQuery.of(context).size.width * 0.7,
-                child: Container(
-                  color: Colors.transparent,
-                  child: Row(
-                    children: [
-                      // 第一列：分组列表
-                      Expanded(
-                        flex: (scheduleGroupWeight * 100).toInt(),
-                        child: _buildGroupList(),
-                      ),
-                      _buildDragBar(
-                        onDrag: (delta) {
-                          setState(() {
-                            double newGroup = scheduleGroupWeight + delta;
-                            double newChannel = scheduleChannelWeight - delta;
-                            if (newGroup < 0.05) newGroup = 0.05;
-                            if (newChannel < 0.05) newChannel = 0.05;
-                            scheduleGroupWeight = newGroup;
-                            scheduleChannelWeight = newChannel;
-                            scheduleWeight = 1 - newGroup - newChannel;
-                            if (scheduleWeight < 0.05) {
-                              scheduleWeight = 0.05;
-                              double total = newGroup + newChannel;
-                              scheduleGroupWeight = scheduleGroupWeight / total * 0.95;
-                              scheduleChannelWeight = scheduleChannelWeight / total * 0.95;
-                            }
-                          });
-                        },
-                        isEditMode: isEditMode,
-                      ),
-                      // 第二列：频道列表
-                      Expanded(
-                        flex: (scheduleChannelWeight * 100).toInt(),
-                        child: ChannelList(
-                          channels: channels,
-                          selectedChannel: currentChannel,
-                          onSelect: (ch) {
-                            LogService.write('选择频道: ${ch.name}');
-                            setState(() {
-                              currentChannel = ch;
-                              _showEpgInfo = true;
-                            });
-                            Provider.of<SettingsService>(context, listen: false)
-                                .saveLastChannel(ch.name);
-                          },
-                          epgMap: epgMap,
-                          showChannelNumber: false,
-                          showLogo: true,
+                child: Stack(
+                  children: [
+                    // 三列 Row
+                    Row(
+                      children: [
+                        // 第一列：分组列表
+                        Expanded(
+                          flex: (scheduleGroupWeight * 100).toInt(),
+                          child: _buildGroupList(),
                         ),
-                      ),
-                      _buildDragBar(
-                        onDrag: (delta) {
-                          setState(() {
-                            double newChannel = scheduleChannelWeight + delta;
-                            double newSchedule = scheduleWeight - delta;
-                            if (newChannel < 0.05) newChannel = 0.05;
-                            if (newSchedule < 0.05) newSchedule = 0.05;
-                            scheduleChannelWeight = newChannel;
-                            scheduleWeight = newSchedule;
-                            scheduleGroupWeight = 1 - newChannel - newSchedule;
-                            if (scheduleGroupWeight < 0.05) {
-                              scheduleGroupWeight = 0.05;
-                              double total = newChannel + newSchedule;
-                              scheduleChannelWeight = scheduleChannelWeight / total * 0.95;
-                              scheduleWeight = scheduleWeight / total * 0.95;
-                            }
-                          });
-                        },
-                        isEditMode: isEditMode,
-                      ),
-                      // 第三列：节目单（隐藏自身的左侧频道列表）
-                      Expanded(
-                        flex: (scheduleWeight * 100).toInt(),
-                        child: ScheduleView(
-                          channels: channels,
-                          selectedChannel: currentChannel,
-                          epgMap: epgMap,
-                          onSelectChannel: (ch) {
+                        _buildDragBar(
+                          onDrag: (delta) {
                             setState(() {
-                              currentChannel = ch;
-                              _showEpgInfo = true;
+                              double newGroup = scheduleGroupWeight + delta;
+                              double newChannel = scheduleChannelWeight - delta;
+                              if (newGroup < 0.05) newGroup = 0.05;
+                              if (newChannel < 0.05) newChannel = 0.05;
+                              scheduleGroupWeight = newGroup;
+                              scheduleChannelWeight = newChannel;
+                              scheduleWeight = 1 - newGroup - newChannel;
+                              if (scheduleWeight < 0.05) {
+                                scheduleWeight = 0.05;
+                                double total = newGroup + newChannel;
+                                scheduleGroupWeight = scheduleGroupWeight / total * 0.95;
+                                scheduleChannelWeight = scheduleChannelWeight / total * 0.95;
+                              }
+                            });
+                          },
+                          isEditMode: isEditMode,
+                        ),
+                        // 第二列：频道列表
+                        Expanded(
+                          flex: (scheduleChannelWeight * 100).toInt(),
+                          child: ChannelList(
+                            channels: channels,
+                            selectedChannel: currentChannel,
+                            onSelect: (ch) {
+                              LogService.write('选择频道: ${ch.name}');
+                              setState(() {
+                                currentChannel = ch;
+                                _showEpgInfo = true;
+                              });
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
-                            });
-                          },
-                          leftWeight: 0.3,
-                          rightWeight: 0.7,
-                          onLeftWeightChanged: (_) {},
-                          isEditMode: isEditMode,
-                          showLeft: false, // 关键：隐藏内置频道列表
+                            },
+                            epgMap: epgMap,
+                            showChannelNumber: false,
+                            showLogo: true,
+                          ),
                         ),
-                      ),
-                      // 返回按钮（左上角）
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: GestureDetector(
-                          onTap: () {
+                        _buildDragBar(
+                          onDrag: (delta) {
                             setState(() {
-                              isScheduleMode = false;
-                              showChannelList = true;
+                              double newChannel = scheduleChannelWeight + delta;
+                              double newSchedule = scheduleWeight - delta;
+                              if (newChannel < 0.05) newChannel = 0.05;
+                              if (newSchedule < 0.05) newSchedule = 0.05;
+                              scheduleChannelWeight = newChannel;
+                              scheduleWeight = newSchedule;
+                              scheduleGroupWeight = 1 - newChannel - newSchedule;
+                              if (scheduleGroupWeight < 0.05) {
+                                scheduleGroupWeight = 0.05;
+                                double total = newChannel + newSchedule;
+                                scheduleChannelWeight = scheduleChannelWeight / total * 0.95;
+                                scheduleWeight = scheduleWeight / total * 0.95;
+                              }
                             });
                           },
-                          child: Container(
-                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.arrow_back, color: Colors.white, size: 16),
-                                SizedBox(width: 4),
-                                Text('返回', style: TextStyle(color: Colors.white, fontSize: 12)),
-                              ],
-                            ),
+                          isEditMode: isEditMode,
+                        ),
+                        // 第三列：节目单（隐藏内置频道列表）
+                        Expanded(
+                          flex: (scheduleWeight * 100).toInt(),
+                          child: ScheduleView(
+                            channels: channels,
+                            selectedChannel: currentChannel,
+                            epgMap: epgMap,
+                            onSelectChannel: (ch) {
+                              setState(() {
+                                currentChannel = ch;
+                                _showEpgInfo = true;
+                                Provider.of<SettingsService>(context, listen: false)
+                                    .saveLastChannel(ch.name);
+                              });
+                            },
+                            leftWeight: 0.3,
+                            rightWeight: 0.7,
+                            onLeftWeightChanged: (_) {},
+                            isEditMode: isEditMode,
+                            showLeft: false, // 关键：隐藏内置频道列表
+                          ),
+                        ),
+                      ],
+                    ),
+                    // 返回按钮（浮在左上角）
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            isScheduleMode = false;
+                            showChannelList = true;
+                          });
+                        },
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.arrow_back, color: Colors.white, size: 16),
+                              SizedBox(width: 4),
+                              Text('返回', style: TextStyle(color: Colors.white, fontSize: 12)),
+                            ],
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
 
