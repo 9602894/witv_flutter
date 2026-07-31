@@ -17,11 +17,10 @@ class LogService {
       }
       final fileName = 'app_$timestamp.log';
       _logFile = File('${logDir.path}/$fileName');
-      await _logFile.create(recursive: true);
+      await _logFile!.create(recursive: true); // 使用 ! 确保非空
       await write('=== 应用启动 ===');
       _initialized = true;
     } catch (e) {
-      // 如果无法创建日志文件，输出到控制台
       print('LogService init error: $e');
     }
   }
@@ -32,7 +31,7 @@ class LogService {
       final line = '[${DateTime.now().toIso8601String()}] $message\n';
       await _logFile!.writeAsString(line, mode: FileMode.append);
     } catch (e) {
-      // 静默失败，避免干扰主逻辑
+      // 静默失败
     }
   }
 
@@ -47,15 +46,22 @@ class LogService {
       ];
       await write(lines.join('\n'));
     } catch (e) {
-      // 忽略写入错误
+      // 忽略
     }
   }
 
-  // 可选：清理旧日志（保留最近N个文件）
+  // 导出日志文件（供设置界面使用）
+  static Future<File?> export() async {
+    if (_logFile == null) await init();
+    return _logFile;
+  }
+
+  // 可选清理旧日志
   static Future<void> cleanOldLogs({int keepCount = 10}) async {
     try {
-      final dir = _logFile?.parent;
-      if (dir == null || !await dir.exists()) return;
+      if (_logFile == null) return;
+      final dir = _logFile!.parent;
+      if (!await dir.exists()) return;
       final files = await dir.list().where((e) => e is File && e.path.endsWith('.log')).toList();
       if (files.length <= keepCount) return;
       files.sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
