@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_vlc_player/flutter_vlc_player.dart';
+import 'package:awesome_video_player/awesome_video_player.dart';
 import '../services/log_service.dart';
 
 class PlayerWidget extends StatefulWidget {
@@ -20,17 +20,15 @@ class PlayerWidget extends StatefulWidget {
 }
 
 class _PlayerWidgetState extends State<PlayerWidget> {
-  VlcPlayerController? _controller;
+  AwesomeVideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _isLoading = true;
   bool _isFailed = false;
   bool _isDisposed = false;
   String _currentUrl = '';
   Timer? _speedTimer;
-  Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 5;      // 增加重试次数
-  static const int initTimeoutSeconds = 3;         // 超时延长至3秒
+  static const int maxReconnectAttempts = 3;
   double _speed = 0;
 
   @override
@@ -46,14 +44,12 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (oldWidget.url != widget.url && !_isDisposed) {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
-      _isFailed = false;
       _initPlayer();
     }
   }
 
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
-    // 清理旧控制器
     await _controller?.stop();
     await _controller?.dispose();
     _controller = null;
@@ -62,63 +58,41 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _isFailed = false;
     setState(() {});
 
-    LogService.write('VLC 播放频道: ${_extractChannelName(_currentUrl)}');
+    LogService.write('播放频道 (Awesome): ${_extractChannelName(_currentUrl)}');
 
-    // 创建控制器，网络缓存设为 800ms（平衡速度与稳定性）
-    _controller = VlcPlayerController.network(
+    _controller = AwesomeVideoPlayerController.network(
       _currentUrl,
-      hwAcc: HwAcc.full,
       autoPlay: true,
-      options: VlcPlayerOptions(
-        advanced: VlcAdvancedOptions([
-          VlcAdvancedOptions.networkCaching(800),   // 调高缓存
-        ]),
-        http: VlcHttpOptions([
-          VlcHttpOptions.httpReconnect(true),
-          VlcHttpOptions.httpUserAgent('VLC/3.0.18'),
-        ]),
-      ),
+      // 可选：设置缓存大小（毫秒），类似酷9的 analyzeduration
+      // cacheSize: 500, // 默认 1500ms
     );
 
     _controller!.addListener(_onControllerListener);
 
     try {
-      await _controller!.initialize().timeout(Duration(seconds: initTimeoutSeconds));
+      await _controller!.initialize().timeout(Duration(seconds: 3));
       if (_isDisposed) return;
       setState(() {
         _isInitialized = true;
         _isLoading = false;
-        _isFailed = false;
       });
       await _controller!.play();
-      LogService.write('VLC 初始化成功: $_currentUrl');
+      LogService.write('Awesome 初始化成功: $_currentUrl');
       _startSpeedMonitor();
       _reconnectAttempts = 0;
     } catch (e) {
       if (_isDisposed) return;
-      LogService.write('VLC 初始化失败: $e (尝试 ${_reconnectAttempts+1}/$maxReconnectAttempts)');
+      LogService.write('Awesome 初始化失败: $e');
       setState(() {
         _isLoading = false;
         _isFailed = true;
       });
       widget.onError();
-      // 自动重试，无需用户点击
-      _scheduleReconnect();
+      if (_reconnectAttempts < maxReconnectAttempts) {
+        _reconnectAttempts++;
+        Future.delayed(Duration(milliseconds: 500), _initPlayer);
+      }
     }
-  }
-
-  void _scheduleReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts) {
-      LogService.write('VLC 重试次数已达上限，停止重试');
-      setState(() => _isFailed = true);
-      return;
-    }
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(milliseconds: 800), () {
-      if (_isDisposed) return;
-      _reconnectAttempts++;
-      _initPlayer();
-    });
   }
 
   void _onControllerListener() {
@@ -128,9 +102,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       setState(() => _isLoading = false);
     }
     if (state.hasError) {
-      LogService.write('VLC 播放错误: ${state.errorDescription}');
+      LogService.write('Awesome 播放错误: ${state.errorDescription}');
       if (_reconnectAttempts < maxReconnectAttempts) {
-        _scheduleReconnect();
+        _reconnectAttempts++;
+        Future.delayed(Duration(milliseconds: 500), _initPlayer);
       } else {
         setState(() => _isFailed = true);
       }
@@ -139,7 +114,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _retry() {
     _reconnectAttempts = 0;
-    _isFailed = false;
     _initPlayer();
   }
 
@@ -178,13 +152,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               Icon(Icons.error_outline, color: Colors.white70, size: 48),
               SizedBox(height: 16),
-              Text('加载失败', style: TextStyle(color: Colors.white70, fontSize: 16)),
+              Text('加载失败', style: TextStyle(color: Colors.white70)),
               SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _retry,
-                child: Text('重试'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-              ),
+              ElevatedButton(onPressed: _retry, child: Text('重试')),
             ],
           ),
         ),
@@ -200,7 +170,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               CircularProgressIndicator(color: Colors.white),
               SizedBox(height: 10),
-              Text('加载中...', style: TextStyle(color: Colors.white, fontSize: 16)),
+              Text('加载中...', style: TextStyle(color: Colors.white)),
             ],
           ),
         ),
@@ -209,11 +179,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
     return Stack(
       children: [
-        VlcPlayer(
-          controller: _controller!,
-          aspectRatio: 16 / 9,
-          placeholder: Container(color: Colors.black),
-        ),
+        AwesomeVideoPlayer(controller: _controller!),
         Positioned(
           bottom: 20,
           right: 20,
@@ -240,7 +206,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _controller?.stop();
     _controller?.dispose();
     _speedTimer?.cancel();
-    _reconnectTimer?.cancel();
     super.dispose();
   }
 }
