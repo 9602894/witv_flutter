@@ -9,8 +9,12 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 视频播放（官方，最稳定）
-  video_player: ^2.8.0
+  # media_kit 核心
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+
+  # 视频渲染器（Android/iOS 自动选择）
+  media_kit_libs_video: ^1.0.5
 
   # 网络请求
   dio: ^5.4.0
@@ -30,10 +34,10 @@ dependencies:
   # 文件路径
   path_provider: ^2.1.2
 
-  # SVG 图标（可选）
+  # SVG 图标
   flutter_svg: ^2.0.9
 
-  # MD5 哈希计算（EPG 校验用）
+  # MD5 哈希
   crypto: ^3.0.0
 
 dev_dependencies:
