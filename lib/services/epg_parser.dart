@@ -1,200 +1,289 @@
-import 'package:dio/dio.dart';
-import 'package:xml/xml.dart';
-import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:convert';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter/foundation.dart' show compute;
+import 'dart:async';
+import 'package:dio/dio.dart';
+import 'package:crypto/crypto.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:xml/xml.dart';
 import '../models/epg_program.dart';
 import 'log_service.dart';
+import 'config_service.dart'; // 假设有获取 EPG URL 的方法
 
 class EpgParser {
-  static Map<String, String>? _aliasMap;
-  static Map<String, List<EpgProgram>>? _allPrograms;
-  static Map<String, String>? _channelIdMap;
+  static const String epgCacheDirName = 'epgCache';
+  static const String hashFileName = 'epg_hash.txt';
 
-  // 用于 compute 的解析参数
-  static Future<Map<String, List<EpgProgram>>> _parseEpgInIsolate(String xmlString) async {
-    // 在 isolate 中解析 XML
-    final document = XmlDocument.parse(xmlString);
-    final allPrograms = <String, List<EpgProgram>>{};
-    final displayNameToChannelId = <String, String>{};
+  static Directory? _cacheDir;
+  static String? _cachedXmlPath;
+  static String? _cachedHash;
+  static Map<String, List<EpgProgram>>? _programsCache; // 频道名 -> 节目列表
+  static final Map<String, List<EpgProgram>> _channelCache = {};
 
-    for (var channel in document.findAllElements('channel')) {
-      final id = channel.getAttribute('id')!;
-      final displayNames = channel.findAllElements('display-name').map((e) => e.text.trim()).toList();
-      for (var name in displayNames) {
-        displayNameToChannelId[name] = id;
-      }
-    }
-
-    int programCount = 0;
-    for (var prog in document.findAllElements('programme')) {
-      final channelId = prog.getAttribute('channel')!;
-      String startStr = prog.getAttribute('start')!.replaceAll(RegExp(r'[+\-]\d+$'), '').trim();
-      String stopStr = prog.getAttribute('stop')!.replaceAll(RegExp(r'[+\-]\d+$'), '').trim();
-      try {
-        DateTime start, stop;
-        if (RegExp(r'^\d{14}$').hasMatch(startStr)) {
-          start = DateTime(
-            int.parse(startStr.substring(0, 4)),
-            int.parse(startStr.substring(4, 6)),
-            int.parse(startStr.substring(6, 8)),
-            int.parse(startStr.substring(8, 10)),
-            int.parse(startStr.substring(10, 12)),
-            int.parse(startStr.substring(12, 14)),
-          );
-        } else {
-          start = DateTime.parse(startStr);
-        }
-        if (RegExp(r'^\d{14}$').hasMatch(stopStr)) {
-          stop = DateTime(
-            int.parse(stopStr.substring(0, 4)),
-            int.parse(stopStr.substring(4, 6)),
-            int.parse(stopStr.substring(6, 8)),
-            int.parse(stopStr.substring(8, 10)),
-            int.parse(stopStr.substring(10, 12)),
-            int.parse(stopStr.substring(12, 14)),
-          );
-        } else {
-          stop = DateTime.parse(stopStr);
-        }
-
-        final title = prog.findAllElements('title').firstOrNull?.text.trim() ?? '';
-        final desc = prog.findAllElements('desc').firstOrNull?.text.trim() ?? '';
-        allPrograms.putIfAbsent(channelId, () => []);
-        allPrograms[channelId]!.add(EpgProgram(start: start, end: stop, title: title, desc: desc));
-        programCount++;
-      } catch (e) {
-        // 忽略解析错误
-      }
-    }
-    return allPrograms;
-  }
-
-  static Future<Map<String, String>> loadAliasMap() async {
-    if (_aliasMap != null) return _aliasMap!;
-    try {
-      final jsonString = await rootBundle.loadString('assets/epg_data.json');
-      final json = jsonDecode(jsonString);
-      final map = <String, String>{};
-      for (var item in json['epgs']) {
-        final epgid = item['epgid'];
-        final names = (item['name'] as String).split(',');
-        for (var name in names) {
-          map[name.trim()] = epgid;
-        }
-      }
-      _aliasMap = map;
-      await LogService.write('别名映射加载完成，条目数: ${map.length}');
-      return map;
-    } catch (e, stack) {
-      await LogService.writeCrashLog(e, stack);
-      rethrow;
+  // 初始化缓存目录
+  static Future<void> _initCache() async {
+    if (_cacheDir != null) return;
+    final appDocDir = await getApplicationDocumentsDirectory();
+    _cacheDir = Directory('${appDocDir.path}/$epgCacheDirName');
+    if (!await _cacheDir!.exists()) {
+      await _cacheDir!.create(recursive: true);
     }
   }
 
-  static Future<Map<String, List<EpgProgram>>> loadAllEpg(String url) async {
-    if (_allPrograms != null) return _allPrograms!;
-    await LogService.write('开始加载EPG: $url');
+  // 获取当前 EPG 的 URL（从配置中读取）
+  static Future<String?> _getEpgUrl() async {
+    final config = await ConfigService.getConfig();
+    final inner = config['Configuration'] as Map<String, dynamic>?;
+    final epgUrlRaw = inner?['EPG_URLS'] as String?;
+    if (epgUrlRaw == null || epgUrlRaw.isEmpty) return null;
+    if (epgUrlRaw.contains(r'$')) {
+      return epgUrlRaw.split(r'$')[0].trim();
+    }
+    return epgUrlRaw.trim();
+  }
 
+  // 计算文件的 MD5 哈希
+  static String _computeHash(String content) {
+    return md5.convert(utf8.encode(content)).toString();
+  }
+
+  // 下载 EPG 并保存，返回哈希
+  static Future<String?> _downloadEpg(String url) async {
     try {
-      await loadAliasMap();
+      final response = await Dio().get(url);
+      final content = response.data as String;
+      final hash = _computeHash(content);
+      // 保存 XML 文件
+      final xmlFile = File('${_cacheDir!.path}/epg_$hash.xml');
+      await xmlFile.writeAsString(content);
+      // 保存哈希值
+      final hashFile = File('${_cacheDir!.path}/$hashFileName');
+      await hashFile.writeAsString(hash);
+      await LogService.write('EPG 下载成功，哈希: $hash');
+      return hash;
+    } catch (e) {
+      await LogService.write('EPG 下载失败: $e');
+      return null;
+    }
+  }
 
-      final dir = await getApplicationDocumentsDirectory();
-      final cacheFile = File('${dir.path}/epg_cache.xml');
-      final hashFile = File('${dir.path}/epg_hash.txt');
+  // 加载本地缓存的 EPG 数据（全量解析，但仅解析一次）
+  static Future<void> _loadCachedEpg() async {
+    if (_programsCache != null) return;
+    await _initCache();
+    final hashFile = File('${_cacheDir!.path}/$hashFileName');
+    if (!await hashFile.exists()) {
+      _programsCache = {};
+      return;
+    }
+    final hash = await hashFile.readAsString();
+    final xmlFile = File('${_cacheDir!.path}/epg_$hash.xml');
+    if (!await xmlFile.exists()) {
+      _programsCache = {};
+      return;
+    }
+    final xmlContent = await xmlFile.readAsString();
+    try {
+      final map = _parseEpgXml(xmlContent);
+      _programsCache = map;
+      await LogService.write('EPG 缓存加载成功，频道数: ${map.length}');
+    } catch (e) {
+      await LogService.write('EPG 缓存解析失败: $e');
+      _programsCache = {};
+    }
+  }
 
-      bool needDownload = true;
-      final dio = Dio(BaseOptions(
-        connectTimeout: Duration(seconds: 10),
-        receiveTimeout: Duration(seconds: 15),
-      ));
-      try {
-        final hashUrl = '$url.hash';
-        final hashResponse = await dio.get(hashUrl);
-        final remoteHash = hashResponse.data as String;
+  // 解析 XML 内容为 Map<String, List<EpgProgram>>
+  static Map<String, List<EpgProgram>> _parseEpgXml(String xmlContent) {
+    final document = XmlDocument.parse(xmlContent);
+    final programs = <String, List<EpgProgram>>{};
+    final channelElements = document.findAllElements('channel');
+    // 先建立 channel 名 -> id 映射（如果有）
+    final channelMap = <String, String>{};
+    for (var channel in channelElements) {
+      final id = channel.getAttribute('id');
+      final displayName = channel.findElements('display-name').firstOrNull?.text ?? id;
+      if (id != null) {
+        channelMap[displayName] = id;
+      }
+    }
+    // 遍历 programme 元素
+    for (var programme in document.findAllElements('programme')) {
+      final channelId = programme.getAttribute('channel');
+      if (channelId == null) continue;
+      // 查找对应的显示名称（优先反向匹配）
+      String? channelName;
+      for (var entry in channelMap.entries) {
+        if (entry.value == channelId) {
+          channelName = entry.key;
+          break;
+        }
+      }
+      if (channelName == null) continue;
+      final startStr = programme.getAttribute('start');
+      final stopStr = programme.getAttribute('stop');
+      if (startStr == null || stopStr == null) continue;
+      final start = _parseDateTime(startStr);
+      final stop = _parseDateTime(stopStr);
+      if (start == null || stop == null) continue;
+      final title = programme.findElements('title').firstOrNull?.text ?? '';
+      final desc = programme.findElements('desc').firstOrNull?.text ?? '';
+      final epg = EpgProgram(
+        title: title,
+        start: start,
+        end: stop,
+        desc: desc.isNotEmpty ? desc : null,
+      );
+      programs.putIfAbsent(channelName, () => []);
+      programs[channelName]!.add(epg);
+    }
+    // 按时间排序每个频道的节目
+    for (var key in programs.keys) {
+      programs[key]!.sort((a, b) => a.start.compareTo(b.start));
+    }
+    return programs;
+  }
+
+  static DateTime? _parseDateTime(String str) {
+    try {
+      // 格式：20260731113000 +0800 或 20260731113000
+      String trimmed = str.trim();
+      String dateStr;
+      String offset = '';
+      if (trimmed.length >= 14) {
+        dateStr = trimmed.substring(0, 14);
+        if (trimmed.length > 14) {
+          offset = trimmed.substring(14).trim();
+        }
+      } else {
+        return null;
+      }
+      int year = int.parse(dateStr.substring(0, 4));
+      int month = int.parse(dateStr.substring(4, 6));
+      int day = int.parse(dateStr.substring(6, 8));
+      int hour = int.parse(dateStr.substring(8, 10));
+      int minute = int.parse(dateStr.substring(10, 12));
+      int second = int.parse(dateStr.substring(12, 14));
+      // 如果有偏移，简单处理，我们只取 UTC
+      return DateTime.utc(year, month, day, hour, minute, second);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------- 对外接口 ----------
+  // 检查更新：对比远程哈希，如果有变化则下载新文件并删除旧文件
+  static Future<bool> checkForUpdate() async {
+    await _initCache();
+    final url = await _getEpgUrl();
+    if (url == null) return false;
+    try {
+      // 只获取头部，不下载全文（但部分服务器不支持HEAD，则下载）
+      final response = await Dio().head(url);
+      final remoteHash = response.headers.value('etag') ?? 
+                         response.headers.value('x-hash') ?? 
+                         response.headers.value('content-md5');
+      if (remoteHash != null && remoteHash.isNotEmpty) {
+        // 比较本地哈希
+        final hashFile = File('${_cacheDir!.path}/$hashFileName');
+        String localHash = '';
         if (await hashFile.exists()) {
-          final localHash = await hashFile.readAsString();
-          if (localHash.trim() == remoteHash.trim() && await cacheFile.exists()) {
-            needDownload = false;
-            await LogService.write('使用缓存的EPG文件（哈希匹配）');
+          localHash = await hashFile.readAsString();
+        }
+        if (localHash != remoteHash) {
+          // 有更新，删除旧文件
+          if (await hashFile.exists()) {
+            final oldHash = localHash;
+            final oldXml = File('${_cacheDir!.path}/epg_$oldHash.xml');
+            if (await oldXml.exists()) await oldXml.delete();
+            await hashFile.delete();
+          }
+          // 下载新文件
+          final newHash = await _downloadEpg(url);
+          if (newHash != null) {
+            _programsCache = null; // 清空缓存
+            return true;
           }
         }
-        if (needDownload) {
-          final response = await dio.get(url);
-          await cacheFile.writeAsString(response.data as String);
-          await hashFile.writeAsString(remoteHash);
-          await LogService.write('EPG下载完成，已缓存');
+      } else {
+        // 无法获取ETag，则下载整个文件并计算哈希
+        final tempFile = File('${_cacheDir!.path}/temp_epg.xml');
+        await Dio().download(url, tempFile.path);
+        final content = await tempFile.readAsString();
+        final newHash = _computeHash(content);
+        final hashFile = File('${_cacheDir!.path}/$hashFileName');
+        String localHash = '';
+        if (await hashFile.exists()) {
+          localHash = await hashFile.readAsString();
         }
-      } catch (e) {
-        await LogService.write('获取哈希失败，直接下载: $e');
-        final response = await dio.get(url);
-        await cacheFile.writeAsString(response.data as String);
-        await LogService.write('EPG下载完成（无哈希）');
-      }
-
-      // 读取 XML 内容
-      final xmlString = await cacheFile.readAsString();
-
-      // 在 isolate 中解析 XML（避免阻塞 UI）
-      final allPrograms = await compute(_parseEpgInIsolate, xmlString);
-      await LogService.write('EPG解析完成，原始频道数: ${allPrograms.length}');
-
-      // 构建 displayName -> channelId 映射（已在 isolate 中完成，但我们还需要 _channelIdMap 用于调试）
-      // 不过我们需要 displayNameToChannelId 来映射别名，所以我们在 isolate 中已经构建了，但 isolate 返回的是 allPrograms，我们需要 displayNameToChannelId。
-      // 因此，我们重新解析一次 displayNameToChannelId 或修改 compute 返回更多数据。
-      // 为了简单，我们在主线程中重新构建 displayNameToChannelId（只做映射，不做大量解析）
-      // 但为了性能，我们也可以在 compute 中返回包含 displayNameToChannelId 的 Map。
-      // 这里我们简单重新解析 XML 头部，但数据量大，不可取。
-      // 改进：修改 compute 函数返回 (allPrograms, displayNameToChannelId)。
-      // 但由于时间，我们采用简单方法：在 loadAllEpg 中直接解析 displayNameToChannelId（只解析 channel，不解析 programme，很快）
-      // 但为了代码简洁，我们使用之前保存的 displayNameToChannelId，但 compute 无法返回多个值，我们返回一个 tuple 或自定义对象。
-      // 我们重构 compute 返回 Map<String, dynamic> 包含两个键。
-
-      // 由于 compute 限制，我们将 displayNameToChannelId 也放入返回。
-      // 但为了快速修复，我们直接在主线程中从 XML 中提取 channel 映射（只解析 channel，不解析 programme，很快）
-      final document = XmlDocument.parse(xmlString);
-      final displayNameToChannelId = <String, String>{};
-      for (var channel in document.findAllElements('channel')) {
-        final id = channel.getAttribute('id')!;
-        final displayNames = channel.findAllElements('display-name').map((e) => e.text.trim()).toList();
-        for (var name in displayNames) {
-          displayNameToChannelId[name] = id;
-        }
-      }
-      _channelIdMap = displayNameToChannelId;
-      await LogService.write('EPG中频道数: ${displayNameToChannelId.length}');
-
-      // 映射别名
-      final mapped = <String, List<EpgProgram>>{};
-      int successCount = 0, failCount = 0;
-      for (var entry in _aliasMap!.entries) {
-        final channelName = entry.key;
-        final epgid = entry.value;
-        final channelId = displayNameToChannelId[epgid];
-        if (channelId != null && allPrograms.containsKey(channelId)) {
-          mapped[channelName] = allPrograms[channelId]!;
-          successCount++;
+        if (localHash != newHash) {
+          // 删除旧文件
+          if (await hashFile.exists()) {
+            final oldHash = localHash;
+            final oldXml = File('${_cacheDir!.path}/epg_$oldHash.xml');
+            if (await oldXml.exists()) await oldXml.delete();
+            await hashFile.delete();
+          }
+          // 保存新文件
+          final newXmlFile = File('${_cacheDir!.path}/epg_$newHash.xml');
+          await tempFile.copy(newXmlFile.path);
+          await hashFile.writeAsString(newHash);
+          await tempFile.delete();
+          _programsCache = null;
+          return true;
         } else {
-          failCount++;
+          await tempFile.delete();
         }
       }
-      await LogService.write('别名映射结果: 成功 $successCount，失败 $failCount');
-      _allPrograms = mapped;
-      return mapped;
-    } catch (e, stack) {
-      await LogService.writeCrashLog(e, stack);
-      _allPrograms = {};
-      return _allPrograms!;
+    } catch (e) {
+      await LogService.write('EPG 更新检查失败: $e');
     }
+    return false;
   }
 
-  static List<EpgProgram> getProgramsForChannel(String channelName) {
-    return _allPrograms?[channelName] ?? [];
+  // 获取某个频道的节目列表（按需加载）
+  static Future<List<EpgProgram>> getProgramsForChannel(String channelName) async {
+    await _initCache();
+    if (_programsCache == null) {
+      await _loadCachedEpg();
+    }
+    // 如果缓存中没有该频道，尝试从缓存中查找（可能名称不匹配，需要模糊匹配）
+    if (_programsCache != null && _programsCache!.containsKey(channelName)) {
+      return _programsCache![channelName]!;
+    }
+    // 尝试模糊匹配
+    if (_programsCache != null) {
+      for (var key in _programsCache!.keys) {
+        if (key.contains(channelName) || channelName.contains(key)) {
+          return _programsCache![key]!;
+        }
+      }
+    }
+    return [];
   }
 
-  static Map<String, List<EpgProgram>> getAllPrograms() {
-    return _allPrograms ?? {};
+  // 预加载所有 EPG（慎用，仅用于后台预加载）
+  static Future<void> preloadAll() async {
+    await _loadCachedEpg();
+  }
+
+  // 清理缓存（删除所有文件）
+  static Future<void> clearCache() async {
+    await _initCache();
+    if (await _cacheDir!.exists()) {
+      await _cacheDir!.delete(recursive: true);
+      await _cacheDir!.create();
+    }
+    _programsCache = null;
+    await LogService.write('EPG 缓存已清空');
+  }
+
+  // 获取当前缓存的哈希值
+  static Future<String?> getCachedHash() async {
+    await _initCache();
+    final hashFile = File('${_cacheDir!.path}/$hashFileName');
+    if (await hashFile.exists()) {
+      return await hashFile.readAsString();
+    }
+    return null;
   }
 }
