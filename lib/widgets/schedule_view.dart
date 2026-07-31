@@ -35,21 +35,6 @@ class _ScheduleViewState extends State<ScheduleView> {
   int selectedDayIndex = 0;
   List<String> dayLabels = [];
 
-  // 工具：获取当前 UTC 时间
-  DateTime _getUtcNow() => DateTime.now().toUtc();
-
-  // 工具：将 UTC 时间转为北京时间日期字符串（用于分组）
-  String _getBeijingDate(DateTime utcTime) {
-    final beijing = utcTime.add(Duration(hours: 8));
-    return '${beijing.year}-${beijing.month.toString().padLeft(2, '0')}-${beijing.day.toString().padLeft(2, '0')}';
-  }
-
-  // 工具：格式化 UTC 时间为北京时间 HH:mm
-  String _formatBeijingTime(DateTime utcTime) {
-    final beijing = utcTime.add(Duration(hours: 8));
-    return '${beijing.hour.toString().padLeft(2, '0')}:${beijing.minute.toString().padLeft(2, '0')}';
-  }
-
   @override
   void didUpdateWidget(ScheduleView oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -68,16 +53,12 @@ class _ScheduleViewState extends State<ScheduleView> {
     final programs = widget.selectedChannel != null ? widget.epgMap[widget.selectedChannel!.name] ?? [] : [];
     final days = <String>{};
     for (var prog in programs) {
-      // 按北京时间日期分组
-      final dateStr = _getBeijingDate(prog.start);
-      days.add(dateStr);
+      final date = '${prog.start.year}-${prog.start.month.toString().padLeft(2, '0')}-${prog.start.day.toString().padLeft(2, '0')}';
+      days.add(date);
     }
     final sorted = days.toList()..sort();
-
-    // 获取今天的北京时间日期
-    final now = _getUtcNow();
-    final todayStr = _getBeijingDate(now);
-
+    final now = DateTime.now();
+    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     final filtered = <String>[];
     bool found = false;
     for (var d in sorted) {
@@ -97,7 +78,8 @@ class _ScheduleViewState extends State<ScheduleView> {
     List<EpgProgram> dayPrograms = [];
     if (selectedDayIndex < dayLabels.length) {
       final targetDay = dayLabels[selectedDayIndex];
-      dayPrograms = programs.where((p) => _getBeijingDate(p.start) == targetDay).cast<EpgProgram>().toList();
+      dayPrograms = programs.where((p) =>
+          '${p.start.year}-${p.start.month.toString().padLeft(2, '0')}-${p.start.day.toString().padLeft(2, '0')}' == targetDay).cast<EpgProgram>().toList();
     }
 
     if (widget.showLeft) {
@@ -157,9 +139,9 @@ class _ScheduleViewState extends State<ScheduleView> {
             itemCount: dayPrograms.length,
             itemBuilder: (context, index) {
               final prog = dayPrograms[index];
-              final now = _getUtcNow();
+              final now = DateTime.now();
               final isCurrent = prog.start.isBefore(now) && prog.end.isAfter(now);
-              final timeStr = '${_formatBeijingTime(prog.start)}-${_formatBeijingTime(prog.end)}';
+              final timeStr = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')}';
               return Container(
                 color: isCurrent ? Colors.blue.withOpacity(0.4) : Colors.transparent,
                 child: ListTile(
@@ -209,8 +191,8 @@ class _ScheduleViewState extends State<ScheduleView> {
     final month = int.parse(parts[1]);
     final day = int.parse(parts[2]);
     final date = DateTime(int.parse(parts[0]), month, day);
-    final now = _getUtcNow();
-    final todayStr = _getBeijingDate(now);
+    final now = DateTime.now();
+    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     if (dateStr == todayStr) return '今天 $month/$day';
     final weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     return '${weekdays[date.weekday % 7]} $month/$day';
