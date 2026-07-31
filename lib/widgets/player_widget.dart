@@ -30,9 +30,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   static const int maxReconnectAttempts = 10;
   double _speed = 0;
   bool _isReconnecting = false;
-
-  // ★ 新增：加载状态
   bool _isLoading = false;
+
+  // 超时计时器
+  Timer? _initTimeoutTimer;
 
   @override
   void initState() {
@@ -40,53 +41,92 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _initPlayer(widget.url);
   }
 
-  // ★ 优化：使用 Future.microtask 让 UI 先更新，再初始化播放器
+  @override
+  void didUpdateWidget(PlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _isReconnecting = false;
+      _reconnectAttempts = 0;
+      _isInitialized = false;
+      _initPlayer(widget.url);
+    }
+  }
+
   void _initPlayer(String url) {
     _currentUrl = url;
-    _isLoading = true;
-    setState(() {}); // 立即显示加载状态
-
-    // 取消旧控制器，但不立即 dispose，让旧播放器继续播放直到新控制器准备好
-    // 但我们直接 dispose 并创建新的，因为 video_player 不支持复用
+    // 取消旧超时计时器
+    _initTimeoutTimer?.cancel();
+    // 取消旧控制器
     _controller?.dispose();
+    _controller = null;
+    _isInitialized = false;
+    _isLoading = true;
+    setState(() {});
 
-    // 延迟一帧，让 UI 先刷新
+    // 设置超时（10秒）
+    _initTimeoutTimer = Timer(Duration(seconds: 10), () {
+      if (!_isInitialized && mounted) {
+        LogService.write('播放器初始化超时: $url');
+        setState(() {
+          _isLoading = false;
+        });
+        widget.onError();
+        _attemptReconnect();
+      }
+    });
+
+    // 延迟一帧，让 UI 先更新
     Future.microtask(() {
       _createController(url);
     });
   }
 
   void _createController(String url) async {
-    // 先检测网络状态（仅日志）
-    final proxyStatus = await _getProxyStatus();
-    LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
+    try {
+      // 检测网络状态（仅日志）
+      final proxyStatus = await _getProxyStatus();
+      LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
 
-    _controller = VideoPlayerController.network(url)
-      ..initialize().then((_) {
-        if (mounted) {
-          setState(() {
-            _isInitialized = true;
-            _isLoading = false;
-          });
-          _controller!.play();
-          LogService.write('视频初始化成功: $url');
-          _startSpeedMonitor();
-          _reconnectAttempts = 0;
-          _isReconnecting = false;
-        }
-      }).catchError((e) {
-        LogService.write('视频初始化失败: $e');
+      _controller = VideoPlayerController.network(url)
+        ..initialize().then((_) {
+          if (mounted) {
+            // 取消超时计时器
+            _initTimeoutTimer?.cancel();
+            setState(() {
+              _isInitialized = true;
+              _isLoading = false;
+            });
+            _controller!.play();
+            LogService.write('视频初始化成功: $url');
+            _startSpeedMonitor();
+            _reconnectAttempts = 0;
+            _isReconnecting = false;
+          }
+        }).catchError((e) {
+          if (mounted) {
+            _initTimeoutTimer?.cancel();
+            setState(() {
+              _isLoading = false;
+            });
+            LogService.write('视频初始化失败: $e');
+            widget.onError();
+            if (!_isReconnecting) {
+              _attemptReconnect();
+            }
+          }
+        });
+    } catch (e) {
+      if (mounted) {
+        _initTimeoutTimer?.cancel();
         setState(() {
           _isLoading = false;
         });
+        LogService.write('创建控制器异常: $e');
         widget.onError();
-        if (!_isReconnecting) {
-          _attemptReconnect();
-        }
-      });
+      }
+    }
   }
 
-  // 检测代理状态（仅日志）
   Future<String> _getProxyStatus() async {
     try {
       final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
@@ -124,6 +164,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
       if (_controller != null && _controller!.value.isInitialized) {
+        // 模拟网速
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() {
           _speed = simulatedSpeed;
@@ -152,19 +193,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   }
 
   @override
-  void didUpdateWidget(PlayerWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
-      _isReconnecting = false;
-      _reconnectAttempts = 0;
-      _isInitialized = false;
-      _initPlayer(widget.url);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // ★ 显示加载状态
     if (_isLoading || !_isInitialized || _controller == null) {
       return Container(
         color: Colors.black,
@@ -217,6 +246,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _controller?.dispose();
     _speedTimer?.cancel();
     _reconnectTimer?.cancel();
+    _initTimeoutTimer?.cancel();
     super.dispose();
   }
 }
