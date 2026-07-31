@@ -57,7 +57,6 @@ class PlaylistParser {
     return groupMap;
   }
 
-  // ★ 修改：使用 URL 的 hashCode 生成固定文件名（无需额外依赖）
   static Future<File> getCacheFile(String url, String name) async {
     final cacheDir = await SettingsService.getCacheDir();
     final hash = url.hashCode.toRadixString(16).padLeft(8, '0');
@@ -72,16 +71,14 @@ class PlaylistParser {
     if (ext == 'm3u' || ext == 'm3u8' || ext == 'txt') {
       return ext;
     }
-    return 'm3u'; // 默认
+    return 'm3u';
   }
 
-  // ★ 修改：直接覆盖写入，不保留多版本
   static Future<void> saveCache(Map<String, List<Channel>> groupMap, String url, String name) async {
     final file = await getCacheFile(url, name);
     final content = _serializeToM3U(groupMap);
     await file.writeAsString(content);
     await LogService.write('缓存已保存: ${file.path}');
-    // 不再需要清理旧缓存，因为每次覆盖同一个文件
   }
 
   static String _serializeToM3U(Map<String, List<Channel>> groupMap) {
