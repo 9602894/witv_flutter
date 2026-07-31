@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart'; // 引入 IOHttpClientAdapter
 import 'dart:io';
 import '../models/channel.dart';
 import 'log_service.dart';
@@ -9,8 +8,8 @@ class PlaylistParser {
   static Future<Map<String, List<Channel>>> parseFromUrl(String url) async {
     await LogService.write('开始解析播放列表: $url');
     try {
-      final dio = await _createDioWithProxy();
-      final response = await dio.get(url);
+      // 直接使用默认 Dio，不设置任何代理，自动跟随系统网络（包括 VPN）
+      final response = await Dio().get(url);
       final content = response.data as String;
       await LogService.write('下载成功，内容长度: ${content.length}');
       return parseFromString(content);
@@ -20,38 +19,6 @@ class PlaylistParser {
     }
   }
 
-  // 创建支持代理的 Dio 实例（使用 HttpClient.findProxyFromEnvironment）
-  static Future<Dio> _createDioWithProxy() async {
-    final dio = Dio();
-    try {
-      // 使用环境变量代理（适用于设置了 http_proxy 的环境）
-      dio.httpClientAdapter = IOHttpClientAdapter(
-        createHttpClient: () {
-          final client = HttpClient();
-          // 尝试从环境变量获取代理（Android/iOS 上可能不生效，但不会报错）
-          client.findProxy = (uri) {
-            // 首先尝试从环境变量读取
-            final proxy = HttpClient.findProxyFromEnvironment(uri);
-            if (proxy != null && proxy.isNotEmpty) {
-              LogService.write('检测到环境代理: $proxy');
-              return proxy;
-            }
-            // 否则直连（返回 'DIRECT'）
-            return 'DIRECT';
-          };
-          // 忽略证书错误（可选）
-          // client.badCertificateCallback = (cert, host, port) => true;
-          return client;
-        },
-      );
-    } catch (e) {
-      LogService.write('设置代理失败: $e，使用直连');
-      dio.httpClientAdapter = IOHttpClientAdapter();
-    }
-    return dio;
-  }
-
-  // 以下方法保持不变
   static Map<String, List<Channel>> parseFromString(String content) {
     final lines = content.split('\n');
     final Map<String, List<Channel>> groupMap = {};
