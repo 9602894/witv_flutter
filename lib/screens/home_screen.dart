@@ -1,3 +1,4 @@
+import 'dart:io'; // 添加此行
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' show exit;
