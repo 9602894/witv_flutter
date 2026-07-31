@@ -60,14 +60,14 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
     LogService.write('播放频道 (VLC): ${_extractChannelName(_currentUrl)}');
 
-    // 创建控制器，网络缓存设为 300ms（酷9风格）
+    // 创建控制器，网络缓存设为 300ms
     _controller = VlcPlayerController.network(
       _currentUrl,
-      hwAcc: HwAcc.FULL,          // 硬件加速
+      hwAcc: HwAcc.full,          // 硬件加速
       autoPlay: true,
       options: VlcPlayerOptions(
         advanced: VlcAdvancedOptions([
-          VlcAdvancedOptions.networkCaching(300),   // ★ 关键参数，类似 analyzeduration
+          VlcAdvancedOptions.networkCaching(300),
         ]),
         http: VlcHttpOptions([
           VlcHttpOptions.httpReconnect(true),
@@ -75,11 +75,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       ),
     );
 
-    // 添加监听
     _controller!.addListener(_onControllerListener);
 
     try {
-      // 等待初始化完成（最多 2 秒）
       await _controller!.initialize().timeout(Duration(seconds: 2));
       if (_isDisposed) return;
       setState(() {
@@ -112,7 +110,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       setState(() => _isLoading = false);
     }
     if (state.hasError) {
-      LogService.write('VLC 播放错误: ${state.error}");
+      LogService.write('VLC 播放错误: ${state.error}');
       if (_reconnectAttempts < maxReconnectAttempts) {
         _reconnectAttempts++;
         Future.delayed(Duration(milliseconds: 500), _initPlayer);
@@ -142,9 +140,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     try {
       final uri = Uri.parse(url);
       final segments = uri.pathSegments;
-      if (segments.isNotEmpty) return segments.last.split('.').first;
+      if (segments.isNotEmpty) {
+        return segments.last.split('.').first;
+      }
       return url;
-    } catch (_) => url;
+    } catch (_) {
+      return url;
+    }
   }
 
   @override
@@ -195,8 +197,14 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           right: 20,
           child: Container(
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
-            child: Text('${_speed.toStringAsFixed(1)} M/s', style: TextStyle(color: Colors.white, fontSize: 12)),
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '${_speed.toStringAsFixed(1)} M/s',
+              style: TextStyle(color: Colors.white, fontSize: 12),
+            ),
           ),
         ),
       ],
