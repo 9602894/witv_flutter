@@ -621,7 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- EPG 信息浮窗 ----------
+            // ---------- EPG 信息浮窗（已移除点击空白关闭手势） ----------
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -651,13 +651,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             _buildEpgItem(epgMap[currentChannel!.name]![1], '下一节目'),
                         ] else
                           Text('暂无EPG信息', style: TextStyle(color: Colors.white70)),
-                        // 增加关闭按钮
-                        IconButton(
-                          icon: Icon(Icons.close, color: Colors.white),
-                          onPressed: () => setState(() => _showEpgInfo = false),
-                          padding: EdgeInsets.zero,
-                          constraints: BoxConstraints(),
-                        ),
                       ],
                     ),
                   ),
@@ -769,9 +762,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-
-            // ---------- 点击空白关闭 EPG 已移除，新增关闭按钮 ----------
-            // 注意：此处移除了 Positioned.fill 中的 GestureDetector
           ],
         ),
       ),
@@ -985,7 +975,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 数据加载（开机） =====
+  // ===== 数据加载 =====
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
