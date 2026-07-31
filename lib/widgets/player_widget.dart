@@ -1,7 +1,7 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
 
 class PlayerWidget extends StatefulWidget {
@@ -21,118 +21,30 @@ class PlayerWidget extends StatefulWidget {
 }
 
 class _PlayerWidgetState extends State<PlayerWidget> {
-  static Player? _player; // 全局单例播放器
-  VideoController? _videoController;
+  VideoPlayerController? _controller;
+  VideoPlayerController? _nextController;
   bool _isInitialized = false;
   bool _isLoading = true;
   bool _isFailed = false;
   bool _isDisposed = false;
+  bool _isSwitching = false;
   String _currentUrl = '';
   Timer? _speedTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 3;
-  double _speed = 0;
+  static const int maxReconnectAttempts = 999; // 无限重试
+  static const int initTimeoutMs = 15000; // 15 秒超时（适应慢速服务器）
+  static const int retryBaseDelayMs = 1000;
+  static const int retryMaxDelayMs = 10000;
 
-  // 缓冲状态
-  bool _isBuffering = false;
+  double _speed = 0;
+  int _lastUpdateTime = 0;
+  int _lastPosition = 0;
 
   @override
   void initState() {
     super.initState();
     _currentUrl = widget.url;
-    _initPlayer();
-  }
-
-  // 初始化全局播放器（仅一次）
-  Future<void> _initGlobalPlayer() async {
-    if (_player != null) return;
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        // 核心优化：极低缓存，类似酷9的 analyzeduration = 1
-        // libmpv 参数：cache-secs=0.5, demuxer-max-bytes=10M
-        // 这里通过 extra 传递 mpv 参数
-        extra: {
-          'cache-secs': '0.5',
-          'demuxer-max-bytes': '10M',
-          'demuxer-readahead-secs': '1',
-          'network-timeout': '5',
-        },
-      ),
-    );
-    // 监听缓冲状态
-    _player!.stream.buffering.listen((buffering) {
-      if (mounted) {
-        setState(() => _isBuffering = buffering);
-      }
-    });
-    // 监听播放状态
-    _player!.stream.position.listen((position) {
-      // 可更新进度
-    });
-  }
-
-  Future<void> _initPlayer() async {
-    if (_isDisposed) return;
-    await _initGlobalPlayer();
-
-    _isLoading = true;
-    _isFailed = false;
-    _isInitialized = false;
-    setState(() {});
-
-    LogService.write('media_kit 播放频道: ${_extractChannelName(_currentUrl)}');
-
-    try {
-      // 如果已有视频控制器，先断开
-      _videoController?.dispose();
-      _videoController = VideoController(_player!);
-
-      // 打开新媒体（超时控制）
-      await _player!.open(
-        Media(_currentUrl),
-        play: true,
-      ).timeout(const Duration(seconds: 5));
-
-      if (_isDisposed) return;
-
-      setState(() {
-        _isInitialized = true;
-        _isLoading = false;
-        _isFailed = false;
-      });
-
-      LogService.write('media_kit 初始化成功: $_currentUrl');
-      _startSpeedMonitor();
-      _reconnectAttempts = 0;
-    } catch (e) {
-      if (_isDisposed) return;
-      LogService.write('media_kit 初始化失败: $e');
-      setState(() {
-        _isLoading = false;
-        _isFailed = true;
-      });
-      widget.onError();
-      _scheduleReconnect();
-    }
-  }
-
-  void _scheduleReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts) {
-      setState(() => _isFailed = true);
-      return;
-    }
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(milliseconds: 500), () {
-      if (_isDisposed) return;
-      _reconnectAttempts++;
-      _initPlayer();
-    });
-  }
-
-  void _retry() {
-    _reconnectAttempts = 0;
-    _isFailed = false;
     _initPlayer();
   }
 
@@ -143,21 +55,187 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
       _isFailed = false;
-      // 直接切换，无需重建播放器
-      _initPlayer();
+      setState(() => _isSwitching = true);
+      _preloadPlayer();
     }
+  }
+
+  VideoFormat _detectFormat(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8') || lower.contains('hls')) return VideoFormat.hls;
+    if (lower.contains('.mpd') || lower.contains('dash')) return VideoFormat.dash;
+    return VideoFormat.other;
+  }
+
+  Future<void> _preloadPlayer() async {
+    if (_isDisposed) return;
+    LogService.write('预加载频道: ${_extractChannelName(_currentUrl)}');
+    final oldPreload = _nextController;
+    _nextController = null;
+
+    try {
+      _nextController = VideoPlayerController.network(
+        _currentUrl,
+        formatHint: _detectFormat(_currentUrl),
+      );
+      await _nextController!.initialize().timeout(
+        const Duration(milliseconds: initTimeoutMs),
+      );
+      if (_isDisposed) {
+        await _nextController?.dispose();
+        return;
+      }
+      LogService.write('预加载成功: $_currentUrl');
+      _swapController();
+    } catch (e) {
+      LogService.write('预加载失败: $e，回退直接加载');
+      await _nextController?.dispose();
+      _nextController = null;
+      _initPlayer();
+    } finally {
+      await oldPreload?.dispose();
+    }
+  }
+
+  void _swapController() {
+    if (_nextController == null || _isDisposed) return;
+    final oldController = _controller;
+    oldController?.removeListener(_onControllerListener);
+
+    _controller = _nextController;
+    _nextController = null;
+    _isInitialized = true;
+    _isLoading = false;
+    _isFailed = false;
+    _isSwitching = false;
+    _reconnectAttempts = 0;
+
+    _controller!.addListener(_onControllerListener);
+    _controller!.play();
+
+    if (oldController != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await oldController.dispose();
+      });
+    }
+
+    if (mounted) setState(() {});
+    _startSpeedMonitor();
+    LogService.write('切换完成: $_currentUrl');
+  }
+
+  Future<void> _initPlayer() async {
+    if (_isDisposed) return;
+    final oldController = _controller;
+    _controller = null;
+    _isInitialized = false;
+    _isLoading = true;
+    _isFailed = false;
+    _isSwitching = false;
+
+    if (mounted) setState(() {});
+
+    if (oldController != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await oldController.dispose();
+      });
+    }
+
+    LogService.write('直接加载频道: ${_extractChannelName(_currentUrl)}');
+
+    try {
+      _controller = VideoPlayerController.network(
+        _currentUrl,
+        formatHint: _detectFormat(_currentUrl),
+      );
+      await _controller!.initialize().timeout(
+        const Duration(milliseconds: initTimeoutMs),
+      );
+      if (_isDisposed) {
+        await _controller?.dispose();
+        return;
+      }
+      _isInitialized = true;
+      _isLoading = false;
+      if (mounted) setState(() {});
+      _controller!.play();
+      LogService.write('直接加载成功: $_currentUrl');
+      _startSpeedMonitor();
+      _reconnectAttempts = 0;
+    } catch (e) {
+      if (_isDisposed) return;
+      LogService.write('直接加载失败: $e');
+      _isLoading = false;
+      _isFailed = false; // 不设置为 true，允许重试
+      if (mounted) setState(() {});
+      widget.onError();
+      _scheduleReconnect();
+    }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= maxReconnectAttempts) {
+      // 但 maxReconnectAttempts 很大，所以不会执行到这里
+      if (mounted) setState(() => _isFailed = true);
+      return;
+    }
+    _reconnectTimer?.cancel();
+    final delay = min(
+      retryBaseDelayMs * pow(2, _reconnectAttempts).toInt(),
+      retryMaxDelayMs,
+    );
+    LogService.write('计划 ${delay}ms 后第 ${_reconnectAttempts + 1} 次重试');
+    _reconnectTimer = Timer(Duration(milliseconds: delay), () {
+      if (_isDisposed) return;
+      _reconnectAttempts++;
+      _initPlayer();
+    });
+  }
+
+  void _onControllerListener() {
+    if (_controller == null || _isDisposed) return;
+    final value = _controller!.value;
+    if (value.hasError) {
+      LogService.write('播放错误: ${value.errorDescription}');
+      _controller!.removeListener(_onControllerListener);
+      _controller!.pause();
+      if (_reconnectAttempts < maxReconnectAttempts) {
+        _scheduleReconnect();
+      } else {
+        if (mounted) setState(() => _isFailed = true);
+      }
+      return;
+    }
+    if (value.isBuffering && value.isPlaying) {
+      // 缓冲中，不处理
+    }
+  }
+
+  void _retry() {
+    _reconnectAttempts = 0;
+    _isFailed = false;
+    _initPlayer();
   }
 
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
+    _lastUpdateTime = DateTime.now().millisecondsSinceEpoch;
+    _lastPosition = _controller?.value.position.inMilliseconds ?? 0;
     _speedTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      if (_player == null || !_player!.state.playing) {
-        return;
+      if (_controller == null || !_controller!.value.isInitialized || _isDisposed) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final currentPos = _controller!.value.position.inMilliseconds;
+      final timeDiff = (now - _lastUpdateTime) / 1000.0;
+      if (timeDiff > 0) {
+        final posDiff = (currentPos - _lastPosition) / 1000.0;
+        final actualSpeed = posDiff / timeDiff;
+        final displaySpeed = (actualSpeed * 0.8).clamp(0.1, 50.0);
+        _speed = displaySpeed;
+        _lastUpdateTime = now;
+        _lastPosition = currentPos;
+        widget.onSpeedUpdate(displaySpeed);
+        if (mounted && !_isLoading && !_isFailed) setState(() {});
       }
-      // 模拟速度显示
-      double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
-      setState(() => _speed = simulatedSpeed);
-      widget.onSpeedUpdate(simulatedSpeed);
     });
   }
 
@@ -190,7 +268,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       );
     }
 
-    if (_isLoading || !_isInitialized || _videoController == null) {
+    if (_isLoading && !_isSwitching) {
       return Container(
         color: Colors.black,
         child: const Center(
@@ -206,52 +284,52 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       );
     }
 
-    // 实际播放
-    return Stack(
-      children: [
-        Video(
-          controller: _videoController!,
-          controls: NoVideoControls, // 无原生控件
-        ),
-        // 缓冲指示器
-        if (_isBuffering)
-          Container(
-            color: Colors.black26,
-            child: const Center(
-              child: SizedBox(
-                width: 36,
-                height: 36,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
+    if (_controller != null && _isInitialized) {
+      return Stack(
+        children: [
+          VideoPlayer(_controller!),
+          if (_isSwitching)
+            Container(
+              color: Colors.black26,
+              child: const Center(
+                child: SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
                 ),
               ),
             ),
-          ),
-        Positioned(
-          bottom: 20,
-          right: 20,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(4),
+          Positioned(
+            bottom: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${_speed.toStringAsFixed(1)} M/s',
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
             ),
-            child: Text(
-              '${_speed.toStringAsFixed(1)} M/s',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-            ),
           ),
-        ),
-      ],
-    );
+        ],
+      );
+    }
+
+    return Container(color: Colors.black);
   }
 
   @override
   void dispose() {
     _isDisposed = true;
-    _videoController?.dispose();
-    // 不 dispose _player，保持复用
+    _controller?.removeListener(_onControllerListener);
+    _controller?.dispose();
+    _nextController?.dispose();
     _speedTimer?.cancel();
     _reconnectTimer?.cancel();
     super.dispose();
