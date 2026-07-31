@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' show exit;
+import 'dart:convert';
+import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/config_service.dart';
 import '../services/playlist_parser.dart';
@@ -44,7 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double scheduleChannelWeight = 0.35;
   double scheduleWeight = 0.40;
 
-  // ---------- 按钮偏移（用于编辑模式拖拽） ----------
+  // ---------- 按钮偏移（无限制） ----------
   Offset scheduleModeButtonOffset = Offset.zero;   // “频道组”按钮偏移
   Offset channelListButtonOffset = Offset.zero;    // “节目单”按钮偏移
 
@@ -53,11 +55,81 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = true;
   bool _hasSubscriptions = false;
 
+  // ---------- 布局配置文件路径 ----------
+  late File _layoutConfigFile;
+
   @override
   void initState() {
     super.initState();
     LogService.write('主页初始化');
+    _initLayoutConfigFile();
+    _loadLayoutConfig();
     _init();
+  }
+
+  // 初始化配置文件
+  Future<void> _initLayoutConfigFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    _layoutConfigFile = File('${dir.path}/layout_config.json');
+  }
+
+  // 加载布局配置
+  Future<void> _loadLayoutConfig() async {
+    try {
+      if (await _layoutConfigFile.exists()) {
+        final content = await _layoutConfigFile.readAsString();
+        final json = jsonDecode(content) as Map<String, dynamic>;
+        // 列宽
+        subWeight = json['subWeight']?.toDouble() ?? 0.20;
+        groupWeight = json['groupWeight']?.toDouble() ?? 0.20;
+        channelWeight = json['channelWeight']?.toDouble() ?? 0.60;
+        scheduleGroupWeight = json['scheduleGroupWeight']?.toDouble() ?? 0.25;
+        scheduleChannelWeight = json['scheduleChannelWeight']?.toDouble() ?? 0.35;
+        scheduleWeight = json['scheduleWeight']?.toDouble() ?? 0.40;
+        // 按钮偏移（无限制）
+        scheduleModeButtonOffset = Offset(
+          json['scheduleModeButtonDx']?.toDouble() ?? 0.0,
+          json['scheduleModeButtonDy']?.toDouble() ?? 0.0,
+        );
+        channelListButtonOffset = Offset(
+          json['channelListButtonDx']?.toDouble() ?? 0.0,
+          json['channelListButtonDy']?.toDouble() ?? 0.0,
+        );
+        LogService.write('布局配置加载成功');
+      }
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  }
+
+  // 保存布局配置
+  Future<void> _saveLayoutConfig() async {
+    try {
+      final json = {
+        'subWeight': subWeight,
+        'groupWeight': groupWeight,
+        'channelWeight': channelWeight,
+        'scheduleGroupWeight': scheduleGroupWeight,
+        'scheduleChannelWeight': scheduleChannelWeight,
+        'scheduleWeight': scheduleWeight,
+        'scheduleModeButtonDx': scheduleModeButtonOffset.dx,
+        'scheduleModeButtonDy': scheduleModeButtonOffset.dy,
+        'channelListButtonDx': channelListButtonOffset.dx,
+        'channelListButtonDy': channelListButtonOffset.dy,
+      };
+      await _layoutConfigFile.writeAsString(jsonEncode(json));
+      LogService.write('布局配置已保存');
+    } catch (e, stack) {
+      LogService.writeCrashLog(e, stack);
+    }
+  }
+
+  // 退出编辑时保存
+  void _exitEditMode() {
+    setState(() {
+      isEditMode = false;
+    });
+    _saveLayoutConfig();
   }
 
   @override
@@ -105,10 +177,12 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             // ---------- 播放器 ----------
             if (currentChannel != null)
-              PlayerWidget(
-                url: currentChannel!.url,
-                onError: () => LogService.write('播放器错误回调'),
-                onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
+              Positioned.fill(
+                child: PlayerWidget(
+                  url: currentChannel!.url,
+                  onError: () => LogService.write('播放器错误回调'),
+                  onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
+                ),
               ),
 
             // ---------- 左侧点击区域 ----------
@@ -219,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 showLogo: true,
                               ),
                             ),
-                            // 竖排“节目单”按钮（支持拖拽）
+                            // 竖排“节目单”按钮（可无限制拖拽）
                             Positioned(
                               right: 20 + channelListButtonOffset.dx,
                               top: channelListButtonOffset.dy,
@@ -356,7 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
-                    // “频道组”按钮（竖排，左侧垂直居中，可拖拽）
+                    // “频道组”按钮（竖排，左侧垂直居中，可无限制拖拽）
                     Positioned(
                       left: 8 + scheduleModeButtonOffset.dx,
                       top: null,
@@ -450,7 +524,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       }),
                       _buildMenuItem(Icons.edit, '编辑', () {
                         setState(() {
-                          isEditMode = !isEditMode;
+                          // 如果正在编辑，则退出并保存；否则进入编辑
+                          if (isEditMode) {
+                            _exitEditMode();
+                          } else {
+                            isEditMode = true;
+                          }
                           _showRightMenu = false;
                         });
                       }),
@@ -478,7 +557,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   IconButton(
                     icon: Icon(Icons.edit, color: Colors.white),
-                    onPressed: () => setState(() => isEditMode = !isEditMode),
+                    onPressed: () {
+                      if (isEditMode) {
+                        _exitEditMode();
+                      } else {
+                        setState(() => isEditMode = true);
+                      }
+                    },
                   ),
                   IconButton(
                     icon: Icon(Icons.settings, color: Colors.white),
@@ -518,7 +603,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                       SizedBox(width: 16),
                       ElevatedButton(
-                        onPressed: () => setState(() => isEditMode = false),
+                        onPressed: _exitEditMode,
                         child: Text('退出编辑', style: TextStyle(fontSize: 12)),
                         style: ElevatedButton.styleFrom(padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2)),
                       ),
