@@ -37,20 +37,19 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _initPlayer(widget.url);
   }
 
-  // 检测代理状态（仅用于日志，不影响网络）
+  // 检测代理状态（仅用于日志）
   Future<String> _getProxyStatus() async {
     try {
-      // 1. 检测环境变量
+      // 检测环境变量
       final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
       final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
       if ((httpProxy != null && httpProxy.isNotEmpty) || (httpsProxy != null && httpsProxy.isNotEmpty)) {
         return '代理 (环境变量)';
       }
-      // 2. 检测 VPN 虚拟接口
+      // 检测 VPN 接口（简单判断）
       final interfaces = await NetworkInterface.list(includeLinkLocal: false);
       for (var iface in interfaces) {
-        final name = iface.name.toLowerCase();
-        if (name.contains('tun') || name.contains('ppp') || name.contains('utun') || name.contains('vpn')) {
+        if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
           return 'VPN (虚拟接口)';
         }
       }
@@ -64,7 +63,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _currentUrl = url;
     _controller?.dispose();
 
-    // 获取代理状态并记录
     final proxyStatus = await _getProxyStatus();
     LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
 
