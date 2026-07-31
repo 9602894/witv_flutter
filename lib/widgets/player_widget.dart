@@ -125,13 +125,16 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     });
   }
 
+  // ★ 修正语法错误
   String _extractChannelName(String url) {
     try {
       final uri = Uri.parse(url);
       final segments = uri.pathSegments;
       if (segments.isNotEmpty) return segments.last.split('.').first;
       return url;
-    } catch (_) => url;
+    } catch (_) {
+      return url; // 正确捕获并返回原 URL
+    }
   }
 
   @override
