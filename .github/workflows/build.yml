@@ -33,8 +33,18 @@ jobs:
       - name: Build Android APK (release)
         run: flutter build apk --release
 
+      - name: Set artifact name with time and commit
+        id: set_name
+        run: |
+          # 获取北京时间 (UTC+8)
+          TZ='Asia/Shanghai' date +%Y%m%d%H%M > datetime.txt
+          DATETIME=$(cat datetime.txt)
+          COMMIT_SHORT=$(echo ${{ github.sha }} | cut -c1-7)
+          ARTIFACT_NAME="witv-android-apk-${DATETIME}-${COMMIT_SHORT}"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: witv-android-apk
+          name: ${{ env.ARTIFACT_NAME }}
           path: build/app/outputs/flutter-apk/app-release.apk
