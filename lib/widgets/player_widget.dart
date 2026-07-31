@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
@@ -31,43 +30,18 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   double _speed = 0;
   bool _isReconnecting = false;
 
-  // 缓存代理状态
-  static String? _cachedProxyStatus;
-
   @override
   void initState() {
     super.initState();
     _initPlayer(widget.url);
   }
 
-  // 检测代理状态（基于环境变量）
-  Future<String> _checkProxyStatus() async {
-    if (_cachedProxyStatus != null) return _cachedProxyStatus!;
-    try {
-      // 检查环境变量
-      final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
-      final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
-      if ((httpProxy != null && httpProxy.isNotEmpty) || (httpsProxy != null && httpsProxy.isNotEmpty)) {
-        _cachedProxyStatus = '代理 (环境变量)';
-      } else {
-        // 在 Android 上，可以检查系统属性，但困难，默认直连
-        _cachedProxyStatus = '直连';
-      }
-    } catch (e) {
-      LogService.write('代理检测异常: $e');
-      _cachedProxyStatus = '未知 (检测失败)';
-    }
-    return _cachedProxyStatus!;
-  }
-
   void _initPlayer(String url) {
     _currentUrl = url;
     _controller?.dispose();
 
-    // 记录频道和代理状态
-    _checkProxyStatus().then((status) {
-      LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $status');
-    });
+    // 仅记录频道名，网络代理由系统自动处理（包括 VPN）
+    LogService.write('播放频道: ${_extractChannelName(url)}');
 
     _controller = VideoPlayerController.network(url)
       ..initialize().then((_) {
@@ -90,7 +64,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       });
   }
 
-  // 从 URL 中提取频道名（简单处理，仅用于日志）
   String _extractChannelName(String url) {
     try {
       final uri = Uri.parse(url);
@@ -108,7 +81,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
       if (_controller != null && _controller!.value.isInitialized) {
-        // 模拟网速（0.5-5 M/s），避免显示0.0
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() {
           _speed = simulatedSpeed;
