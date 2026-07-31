@@ -108,11 +108,18 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (!_isInitialized || _controller == null) {
       return Container(color: Colors.transparent);
     }
+    // 全屏填充：使用 FittedBox 将视频拉伸填满整个屏幕，不保留原始比例
     return Stack(
       children: [
-        AspectRatio(
-          aspectRatio: _controller!.value.aspectRatio,
-          child: VideoPlayer(_controller!),
+        Positioned.fill(
+          child: FittedBox(
+            fit: BoxFit.cover, // 裁剪填充，确保覆盖整个屏幕
+            child: SizedBox(
+              width: _controller!.value.size.width,
+              height: _controller!.value.size.height,
+              child: VideoPlayer(_controller!),
+            ),
+          ),
         ),
         Positioned(
           bottom: 20,
@@ -120,13 +127,12 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           child: Container(
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.transparent,
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
               '${_speed.toStringAsFixed(1)} M/s',
-              style: TextStyle(color: Colors.white, fontSize: 12, shadows: [
-                Shadow(offset: Offset(1,1), blurRadius: 4, color: Colors.black87)
-              ]),
+              style: TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
         ),
