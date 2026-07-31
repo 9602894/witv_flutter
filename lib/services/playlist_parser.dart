@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart'; // 引入 IOHttpClientAdapter
 import 'dart:io';
-import 'package:system_proxy/system_proxy.dart'; // 需添加依赖
 import '../models/channel.dart';
 import 'log_service.dart';
 import 'settings_service.dart';
@@ -21,30 +20,32 @@ class PlaylistParser {
     }
   }
 
-  // 创建支持代理的 Dio 实例
+  // 创建支持代理的 Dio 实例（使用 HttpClient.findProxyFromEnvironment）
   static Future<Dio> _createDioWithProxy() async {
     final dio = Dio();
     try {
-      // 获取系统代理（Android/iOS）
-      final proxy = await SystemProxy.getProxy();
-      if (proxy != null && proxy.isNotEmpty) {
-        LogService.write('使用系统代理: $proxy');
-        dio.httpClientAdapter = IOHttpClientAdapter(
-          createHttpClient: () {
-            final client = HttpClient();
-            client.findProxy = (uri) => 'PROXY $proxy';
-            // 忽略证书错误（可选，若代理为 MITM 时可避免问题）
-            // client.badCertificateCallback = (cert, host, port) => true;
-            return client;
-          },
-        );
-      } else {
-        LogService.write('未检测到系统代理，使用直连');
-        // 使用默认适配器（直连）
-        dio.httpClientAdapter = IOHttpClientAdapter();
-      }
+      // 使用环境变量代理（适用于设置了 http_proxy 的环境）
+      dio.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () {
+          final client = HttpClient();
+          // 尝试从环境变量获取代理（Android/iOS 上可能不生效，但不会报错）
+          client.findProxy = (uri) {
+            // 首先尝试从环境变量读取
+            final proxy = HttpClient.findProxyFromEnvironment(uri);
+            if (proxy != null && proxy.isNotEmpty) {
+              LogService.write('检测到环境代理: $proxy');
+              return proxy;
+            }
+            // 否则直连（返回 'DIRECT'）
+            return 'DIRECT';
+          };
+          // 忽略证书错误（可选）
+          // client.badCertificateCallback = (cert, host, port) => true;
+          return client;
+        },
+      );
     } catch (e) {
-      LogService.write('获取代理失败: $e，使用直连');
+      LogService.write('设置代理失败: $e，使用直连');
       dio.httpClientAdapter = IOHttpClientAdapter();
     }
     return dio;
