@@ -9,12 +9,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # media_kit 核心
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
-
-  # 视频渲染器（Android/iOS 自动选择）
-  media_kit_libs_video: ^1.0.5
+  # 视频播放（官方，最稳定）
+  video_player: ^2.8.0
 
   # 网络请求
   dio: ^5.4.0
