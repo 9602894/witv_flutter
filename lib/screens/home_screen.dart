@@ -36,15 +36,17 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showRightMenu = false;
 
   // ---------- 宽度控制 ----------
-  // 频道列表模式（订阅源、分组、频道）
   double subWeight = 0.20;
   double groupWeight = 0.20;
   double channelWeight = 0.60;
 
-  // 节目单模式（分组、频道、节目单）
   double scheduleGroupWeight = 0.25;
   double scheduleChannelWeight = 0.35;
   double scheduleWeight = 0.40;
+
+  // ---------- 按钮偏移（用于编辑模式拖拽） ----------
+  Offset scheduleModeButtonOffset = Offset.zero;   // “频道组”按钮偏移
+  Offset channelListButtonOffset = Offset.zero;    // “节目单”按钮偏移
 
   Map<String, List<EpgProgram>> epgMap = {};
   double currentSpeed = 0;
@@ -109,7 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
               ),
 
-            // ---------- 左侧点击区域（显示/隐藏频道列表） ----------
+            // ---------- 左侧点击区域 ----------
             Positioned(
               left: 0,
               top: 0,
@@ -136,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // ---------- 频道列表模式（showChannelList && !isScheduleMode） ----------
+            // ---------- 频道列表模式 ----------
             if (showChannelList && !isScheduleMode)
               Positioned(
                 left: 0,
@@ -147,7 +149,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.transparent,
                   child: Row(
                     children: [
-                      // 第一列：订阅源
                       Expanded(
                         flex: (subWeight * 100).toInt(),
                         child: _buildSubscriptionList(),
@@ -172,7 +173,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
-                      // 第二列：分组
                       Expanded(
                         flex: (groupWeight * 100).toInt(),
                         child: _buildGroupList(),
@@ -197,7 +197,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         isEditMode: isEditMode,
                       ),
-                      // 第三列：频道列表 + 节目单按钮（竖排）
                       Expanded(
                         flex: (channelWeight * 100).toInt(),
                         child: Stack(
@@ -220,12 +219,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                 showLogo: true,
                               ),
                             ),
-                            // 竖排“节目单”按钮（向右移，更靠左）
+                            // 竖排“节目单”按钮（支持拖拽）
                             Positioned(
-                              right: 20, // 调整此值控制按钮左右位置
-                              top: 0,
-                              bottom: 0,
+                              right: 20 + channelListButtonOffset.dx,
+                              top: channelListButtonOffset.dy,
+                              bottom: null,
                               child: GestureDetector(
+                                onPanUpdate: (details) {
+                                  if (!isEditMode) return;
+                                  setState(() {
+                                    channelListButtonOffset += details.delta;
+                                  });
+                                },
                                 onTap: () {
                                   setState(() {
                                     isScheduleMode = true;
@@ -254,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- 节目单模式（三列：分组、频道、节目单） ----------
+            // ---------- 节目单模式（三列） ----------
             if (isScheduleMode)
               Positioned(
                 left: 0,
@@ -263,10 +268,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: MediaQuery.of(context).size.width * 0.7,
                 child: Stack(
                   children: [
-                    // 三列 Row
                     Row(
                       children: [
-                        // 第一列：分组列表
                         Expanded(
                           flex: (scheduleGroupWeight * 100).toInt(),
                           child: _buildGroupList(),
@@ -291,7 +294,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           isEditMode: isEditMode,
                         ),
-                        // 第二列：频道列表
                         Expanded(
                           flex: (scheduleChannelWeight * 100).toInt(),
                           child: ChannelList(
@@ -331,7 +333,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           isEditMode: isEditMode,
                         ),
-                        // 第三列：节目单（隐藏内置频道列表）
                         Expanded(
                           flex: (scheduleWeight * 100).toInt(),
                           child: ScheduleView(
@@ -350,16 +351,25 @@ class _HomeScreenState extends State<HomeScreen> {
                             rightWeight: 0.7,
                             onLeftWeightChanged: (_) {},
                             isEditMode: isEditMode,
-                            showLeft: false, // 关键：隐藏内置频道列表
+                            showLeft: false,
                           ),
                         ),
                       ],
                     ),
-                    // 返回按钮（浮在左上角）
+                    // “频道组”按钮（竖排，左侧垂直居中，可拖拽）
                     Positioned(
-                      top: 8,
-                      left: 8,
+                      left: 8 + scheduleModeButtonOffset.dx,
+                      top: null,
+                      bottom: null,
+                      height: 80,
+                      width: 26,
                       child: GestureDetector(
+                        onPanUpdate: (details) {
+                          if (!isEditMode) return;
+                          setState(() {
+                            scheduleModeButtonOffset += details.delta;
+                          });
+                        },
                         onTap: () {
                           setState(() {
                             isScheduleMode = false;
@@ -367,17 +377,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           });
                         },
                         child: Container(
-                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
+                          color: Colors.transparent,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.arrow_back, color: Colors.white, size: 16),
-                              SizedBox(width: 4),
-                              Text('返回', style: TextStyle(color: Colors.white, fontSize: 12)),
+                              Text('频', style: TextStyle(color: Colors.white, fontSize: 13)),
+                              Text('道', style: TextStyle(color: Colors.white, fontSize: 13)),
+                              Text('组', style: TextStyle(color: Colors.white, fontSize: 13)),
                             ],
                           ),
                         ),
@@ -722,7 +728,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 添加订阅源对话框（去重） ==========
+  // ========== 添加订阅源对话框 ==========
   void _showAddSubscriptionDialog() {
     final nameCtrl = TextEditingController();
     final urlCtrl = TextEditingController();
@@ -745,7 +751,6 @@ class _HomeScreenState extends State<HomeScreen> {
               final url = urlCtrl.text.trim();
               if (name.isNotEmpty && url.isNotEmpty) {
                 final settings = Provider.of<SettingsService>(context, listen: false);
-                // 去重：检查是否已存在相同URL或名称
                 final exists = settings.subscriptions.any((s) => s.url == url || s.name == name);
                 if (exists) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('订阅源已存在，请勿重复添加')));
@@ -833,7 +838,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
         final settings = Provider.of<SettingsService>(context, listen: false);
-        // 去重：检查是否已存在相同URL
         final exists = settings.subscriptions.any((s) => s.url == url);
         if (!exists) {
           settings.addSubscription(Subscription(name: name, url: url, selected: true));
