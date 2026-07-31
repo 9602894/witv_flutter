@@ -12,7 +12,7 @@ class ScheduleView extends StatefulWidget {
   final double rightWeight;
   final ValueChanged<double> onLeftWeightChanged;
   final bool isEditMode;
-  final bool showLeft; // 新增：是否显示左侧频道列表
+  final bool showLeft;
 
   const ScheduleView({
     Key? key,
@@ -24,7 +24,7 @@ class ScheduleView extends StatefulWidget {
     this.rightWeight = 0.65,
     required this.onLeftWeightChanged,
     this.isEditMode = false,
-    this.showLeft = true, // 默认显示
+    this.showLeft = true,
   }) : super(key: key);
 
   @override
@@ -82,9 +82,7 @@ class _ScheduleViewState extends State<ScheduleView> {
           '${p.start.year}-${p.start.month}-${p.start.day}' == targetDay).cast<EpgProgram>().toList();
     }
 
-    // 根据 showLeft 决定布局
     if (widget.showLeft) {
-      // 两列布局：左侧频道列表 + 右侧节目单
       return Row(
         children: [
           Expanded(
@@ -106,7 +104,6 @@ class _ScheduleViewState extends State<ScheduleView> {
         ],
       );
     } else {
-      // 仅显示节目单内容（用于三列布局）
       return _buildScheduleContent(dayPrograms);
     }
   }
@@ -114,7 +111,6 @@ class _ScheduleViewState extends State<ScheduleView> {
   Widget _buildScheduleContent(List<EpgProgram> dayPrograms) {
     return Column(
       children: [
-        // 日期标签行（水平滚动）
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -138,7 +134,6 @@ class _ScheduleViewState extends State<ScheduleView> {
             }).toList(),
           ),
         ),
-        // 节目列表
         Expanded(
           child: ListView.builder(
             itemCount: dayPrograms.length,
