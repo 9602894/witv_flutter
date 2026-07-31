@@ -31,6 +31,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   double _speed = 0;
   bool _isReconnecting = false;
   bool _isLoading = false;
+  bool _isDisposing = false; // 防止在释放过程中重复操作
 
   @override
   void initState() {
@@ -38,51 +39,70 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _initPlayer(widget.url);
   }
 
-  // 快速检测代理状态，不阻塞 UI
-  Future<String> _getProxyStatus() async {
+  @override
+  void didUpdateWidget(PlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      // 完全释放旧控制器
+      _disposeController();
+      // 重置状态
+      _isReconnecting = false;
+      _reconnectAttempts = 0;
+      _isInitialized = false;
+      _isLoading = false;
+      // 初始化新播放器
+      _initPlayer(widget.url);
+    }
+  }
+
+  // 安全释放控制器
+  void _disposeController() {
+    if (_isDisposing) return;
+    _isDisposing = true;
     try {
-      final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
-      final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
-      if ((httpProxy != null && httpProxy.isNotEmpty) ||
-          (httpsProxy != null && httpsProxy.isNotEmpty)) {
-        return '代理 (环境变量)';
+      _speedTimer?.cancel();
+      _speedTimer = null;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      if (_controller != null) {
+        _controller!.removeListener(() {});
+        _controller!.dispose();
+        _controller = null;
       }
-      // 只检测前几个接口，快速返回
-      final interfaces = await NetworkInterface.list(includeLinkLocal: false, includeLoopback: false);
-      for (var iface in interfaces) {
-        if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
-          return 'VPN (虚拟接口)';
-        }
-      }
-      return '直连';
     } catch (e) {
-      return '未知';
+      LogService.write('释放控制器异常: $e');
+    } finally {
+      _isDisposing = false;
     }
   }
 
   void _initPlayer(String url) {
+    if (_isDisposing) return;
     _currentUrl = url;
     _isLoading = true;
-    setState(() {});
+    _isInitialized = false;
+    if (mounted) setState(() {});
 
-    // 取消旧控制器
-    _controller?.dispose();
-
-    // 异步检测网络（不阻塞）
-    _getProxyStatus().then((status) {
-      LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $status');
-    }).catchError((e) {
-      LogService.write('检测网络状态失败: $e');
+    // 延迟一帧让 UI 先刷新
+    Future.microtask(() {
+      if (!mounted || _isDisposing) return;
+      _createController(url);
     });
-
-    // 立即创建播放器
-    _createController(url);
   }
 
-  void _createController(String url) {
-    _controller = VideoPlayerController.network(url)
-      ..initialize().then((_) {
-        if (mounted) {
+  void _createController(String url) async {
+    if (_isDisposing || !mounted) return;
+    final proxyStatus = await _getProxyStatus();
+    LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
+
+    // 先释放旧的
+    _disposeController();
+    if (!mounted) return;
+
+    try {
+      _controller = VideoPlayerController.network(url)
+        ..initialize().then((_) {
+          if (!mounted || _isDisposing) return;
           setState(() {
             _isInitialized = true;
             _isLoading = false;
@@ -92,17 +112,43 @@ class _PlayerWidgetState extends State<PlayerWidget> {
           _startSpeedMonitor();
           _reconnectAttempts = 0;
           _isReconnecting = false;
-        }
-      }).catchError((e) {
-        LogService.write('视频初始化失败: $e');
-        setState(() {
-          _isLoading = false;
+        }).catchError((e) {
+          if (!mounted) return;
+          LogService.write('视频初始化失败: $e');
+          setState(() {
+            _isLoading = false;
+          });
+          widget.onError();
+          if (!_isReconnecting && !_isDisposing) {
+            _attemptReconnect();
+          }
         });
-        widget.onError();
-        if (!_isReconnecting) {
-          _attemptReconnect();
-        }
+    } catch (e) {
+      LogService.write('创建控制器异常: $e');
+      setState(() {
+        _isLoading = false;
       });
+    }
+  }
+
+  Future<String> _getProxyStatus() async {
+    try {
+      final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
+      final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
+      if ((httpProxy != null && httpProxy.isNotEmpty) ||
+          (httpsProxy != null && httpsProxy.isNotEmpty)) {
+        return '代理 (环境变量)';
+      }
+      final interfaces = await NetworkInterface.list(includeLinkLocal: false);
+      for (var iface in interfaces) {
+        if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
+          return 'VPN (虚拟接口)';
+        }
+      }
+      return '直连';
+    } catch (e) {
+      return '未知';
+    }
   }
 
   String _extractChannelName(String url) {
@@ -121,7 +167,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      if (_controller != null && _controller!.value.isInitialized) {
+      if (_controller != null && _controller!.value.isInitialized && !_isDisposing) {
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() {
           _speed = simulatedSpeed;
@@ -132,7 +178,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   }
 
   void _attemptReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts || _isReconnecting) {
+    if (_reconnectAttempts >= maxReconnectAttempts || _isReconnecting || _isDisposing) {
       LogService.write('重连次数过多或正在重连，停止');
       return;
     }
@@ -141,23 +187,12 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     LogService.write('尝试重连，第 $_reconnectAttempts 次');
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(Duration(seconds: 3), () {
-      if (mounted && !_isInitialized) {
+      if (mounted && !_isInitialized && !_isDisposing) {
         _initPlayer(_currentUrl);
       } else {
         _isReconnecting = false;
       }
     });
-  }
-
-  @override
-  void didUpdateWidget(PlayerWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
-      _isReconnecting = false;
-      _reconnectAttempts = 0;
-      _isInitialized = false;
-      _initPlayer(widget.url);
-    }
   }
 
   @override
@@ -211,9 +246,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   @override
   void dispose() {
-    _controller?.dispose();
-    _speedTimer?.cancel();
-    _reconnectTimer?.cancel();
+    _disposeController();
     super.dispose();
   }
 }
