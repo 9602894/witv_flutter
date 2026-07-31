@@ -5,7 +5,6 @@ import 'log_service.dart';
 import 'settings_service.dart';
 
 class PlaylistParser {
-  // 直接下载列表订阅，不检查哈希
   static Future<Map<String, List<Channel>>> parseFromUrl(String url) async {
     await LogService.write('开始解析播放列表: $url');
     try {
