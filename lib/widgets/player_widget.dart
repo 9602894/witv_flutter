@@ -109,7 +109,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       setState(() => _isLoading = false);
     }
     if (state.hasError) {
-      // 使用 errorDescription
+      // 使用 errorDescription 获取错误信息
       LogService.write('VLC 播放错误: ${state.errorDescription}');
       if (_reconnectAttempts < maxReconnectAttempts) {
         _reconnectAttempts++;
