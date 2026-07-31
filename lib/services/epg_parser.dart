@@ -15,7 +15,6 @@ class EpgParser {
   static Directory? _cacheDir;
   static Map<String, List<EpgProgram>>? _programsCache;
 
-  // 初始化缓存目录
   static Future<void> _initCache() async {
     if (_cacheDir != null) return;
     final appDocDir = await getApplicationDocumentsDirectory();
@@ -25,7 +24,6 @@ class EpgParser {
     }
   }
 
-  // 获取 EPG URL
   static Future<String?> _getEpgUrl() async {
     final config = await ConfigService.getConfig();
     final inner = config['Configuration'] as Map<String, dynamic>?;
@@ -37,28 +35,24 @@ class EpgParser {
     return epgUrlRaw.trim();
   }
 
-  // 计算文件内容的 MD5
   static String _computeHash(String content) {
     return md5.convert(utf8.encode(content)).toString();
   }
 
-  // 下载哈希文件并比对，如果有更新则下载新 XML 并删除旧文件
+  // 检查 .hash 文件并更新
   static Future<bool> _checkHashUpdate(String epgUrl) async {
     try {
       final hashUrl = '$epgUrl.hash';
       final response = await Dio().get(hashUrl);
       final remoteHash = response.data.toString().trim();
-
       if (remoteHash.isEmpty) return false;
 
-      // 读取本地哈希
       final hashFile = File('${_cacheDir!.path}/$hashFileName');
       String localHash = '';
       if (await hashFile.exists()) {
         localHash = await hashFile.readAsString();
       }
 
-      // 如果哈希不同，需要更新
       if (localHash != remoteHash) {
         // 删除旧文件
         if (await hashFile.exists()) {
@@ -76,16 +70,14 @@ class EpgParser {
         final xmlContent = xmlResponse.data as String;
         final newHash = _computeHash(xmlContent);
 
-        // 保存新文件
         final newXmlFile = File('${_cacheDir!.path}/epg_$newHash.xml');
         await newXmlFile.writeAsString(xmlContent);
         await hashFile.writeAsString(newHash);
         await LogService.write('EPG 更新完成，新哈希: $newHash');
 
-        _programsCache = null; // 清空内存缓存
+        _programsCache = null;
         return true;
       }
-
       await LogService.write('EPG 哈希未变化，无需更新');
       return false;
     } catch (e) {
@@ -94,7 +86,6 @@ class EpgParser {
     }
   }
 
-  // 加载本地缓存的 EPG 数据
   static Future<void> _loadCachedEpg() async {
     if (_programsCache != null) return;
     await _initCache();
@@ -122,12 +113,10 @@ class EpgParser {
     }
   }
 
-  // 解析 XML
   static Map<String, List<EpgProgram>> _parseEpgXml(String xmlContent) {
     final document = XmlDocument.parse(xmlContent);
     final programs = <String, List<EpgProgram>>{};
 
-    // 建立频道 ID -> 名称映射
     final channelMap = <String, String>{};
     for (var channel in document.findAllElements('channel')) {
       final id = channel.getAttribute('id');
@@ -137,7 +126,6 @@ class EpgParser {
       }
     }
 
-    // 解析节目
     for (var programme in document.findAllElements('programme')) {
       final channelId = programme.getAttribute('channel');
       if (channelId == null) continue;
@@ -167,7 +155,6 @@ class EpgParser {
       programs[channelName]!.add(epg);
     }
 
-    // 按时间排序
     for (var key in programs.keys) {
       programs[key]!.sort((a, b) => a.start.compareTo(b.start));
     }
@@ -191,7 +178,6 @@ class EpgParser {
 
   // ========== 对外接口 ==========
 
-  // 检查 EPG 更新（通过 .hash 文件）
   static Future<bool> checkForUpdate() async {
     await _initCache();
     final url = await _getEpgUrl();
@@ -199,7 +185,6 @@ class EpgParser {
     return await _checkHashUpdate(url);
   }
 
-  // 获取某个频道的节目列表（按需加载）
   static Future<List<EpgProgram>> getProgramsForChannel(String channelName) async {
     await _initCache();
     if (_programsCache == null) {
@@ -207,12 +192,10 @@ class EpgParser {
     }
     if (_programsCache == null) return [];
 
-    // 精确匹配
     if (_programsCache!.containsKey(channelName)) {
       return _programsCache![channelName]!;
     }
 
-    // 模糊匹配（处理别名）
     for (var key in _programsCache!.keys) {
       if (key.contains(channelName) || channelName.contains(key)) {
         return _programsCache![key]!;
@@ -221,13 +204,11 @@ class EpgParser {
     return [];
   }
 
-  // 获取所有频道名称列表（用于调试）
   static Future<List<String>> getAllChannelNames() async {
     await _loadCachedEpg();
     return _programsCache?.keys.toList() ?? [];
   }
 
-  // 清空缓存
   static Future<void> clearCache() async {
     await _initCache();
     if (await _cacheDir!.exists()) {
@@ -238,7 +219,6 @@ class EpgParser {
     await LogService.write('EPG 缓存已清空');
   }
 
-  // 获取当前缓存的哈希值
   static Future<String?> getCachedHash() async {
     await _initCache();
     final hashFile = File('${_cacheDir!.path}/$hashFileName');
@@ -248,7 +228,6 @@ class EpgParser {
     return null;
   }
 
-  // 预加载所有 EPG（后台可用）
   static Future<void> preloadAll() async {
     await _loadCachedEpg();
   }
