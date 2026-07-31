@@ -48,6 +48,11 @@ android {
         targetSdkVersion 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+
+        // ★ 添加 ndk ABI 过滤器，以支持 VLC 库
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
     }
 
     buildTypes {
