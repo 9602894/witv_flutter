@@ -23,111 +23,171 @@ class PlayerWidget extends StatefulWidget {
 class _PlayerWidgetState extends State<PlayerWidget> {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
+  bool _isLoading = true;
+  bool _isDisposed = false;
   String _currentUrl = '';
   Timer? _speedTimer;
-  Timer? _reconnectTimer;
+  Timer? _refreshTimer; // 断线刷新定时器
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 10;
+  static const int maxReconnectAttempts = 5;
   double _speed = 0;
   bool _isReconnecting = false;
-  bool _isLoading = false;
-  bool _isDisposing = false; // 防止在释放过程中重复操作
+  bool _hasError = false;
 
   @override
   void initState() {
     super.initState();
-    _initPlayer(widget.url);
+    _currentUrl = widget.url;
+    _initPlayer();
   }
 
   @override
   void didUpdateWidget(PlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
-      // 完全释放旧控制器
-      _disposeController();
-      // 重置状态
-      _isReconnecting = false;
+    if (oldWidget.url != widget.url && !_isDisposed) {
+      _currentUrl = widget.url;
       _reconnectAttempts = 0;
-      _isInitialized = false;
-      _isLoading = false;
-      // 初始化新播放器
-      _initPlayer(widget.url);
+      _isReconnecting = false;
+      _hasError = false;
+      _initPlayer();
     }
   }
 
-  // 安全释放控制器
-  void _disposeController() {
-    if (_isDisposing) return;
-    _isDisposing = true;
-    try {
-      _speedTimer?.cancel();
-      _speedTimer = null;
-      _reconnectTimer?.cancel();
-      _reconnectTimer = null;
-      if (_controller != null) {
-        _controller!.removeListener(() {});
-        _controller!.dispose();
-        _controller = null;
-      }
-    } catch (e) {
-      LogService.write('释放控制器异常: $e');
-    } finally {
-      _isDisposing = false;
-    }
-  }
+  // 强制销毁并重建播放器
+  Future<void> _initPlayer() async {
+    if (_isDisposed) return;
+    // 取消所有定时器
+    _refreshTimer?.cancel();
+    _speedTimer?.cancel();
 
-  void _initPlayer(String url) {
-    if (_isDisposing) return;
-    _currentUrl = url;
-    _isLoading = true;
+    // 强制释放旧控制器（同步清除监听）
+    if (_controller != null) {
+      _controller!.removeListener(_onControllerListener);
+      await _controller!.dispose();
+      _controller = null;
+    }
+
     _isInitialized = false;
+    _isLoading = true;
+    _hasError = false;
     if (mounted) setState(() {});
 
-    // 延迟一帧让 UI 先刷新
-    Future.microtask(() {
-      if (!mounted || _isDisposing) return;
-      _createController(url);
+    // 记录代理状态（仅日志）
+    final proxyStatus = await _getProxyStatus();
+    LogService.write('播放频道: ${_extractChannelName(_currentUrl)}，网络状态: $proxyStatus');
+
+    try {
+      _controller = VideoPlayerController.network(_currentUrl);
+      _controller!.addListener(_onControllerListener);
+      // 不设置超时，让播放器自己处理
+      await _controller!.initialize();
+      if (_isDisposed || !mounted) return;
+      setState(() {
+        _isInitialized = true;
+        _isLoading = false;
+        _hasError = false;
+      });
+      _controller!.play();
+      LogService.write('视频初始化成功: $_currentUrl');
+      _startSpeedMonitor();
+      _startRefreshTimer(); // 启动断线检测
+      _reconnectAttempts = 0;
+      _isReconnecting = false;
+    } catch (e) {
+      if (_isDisposed || !mounted) return;
+      LogService.write('视频初始化失败: $e');
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+      });
+      widget.onError();
+      if (!_isReconnecting && _reconnectAttempts < maxReconnectAttempts) {
+        _attemptReconnect();
+      }
+    }
+  }
+
+  void _onControllerListener() {
+    if (_controller == null || _isDisposed) return;
+    final value = _controller!.value;
+    // 检测播放停止或错误
+    if (value.hasError) {
+      LogService.write('播放器错误: ${value.errorDescription}');
+      if (!_isReconnecting && !_hasError) {
+        _hasError = true;
+        _attemptReconnect();
+      }
+    }
+    // 如果播放器停止且未结束，尝试刷新
+    if (!value.isPlaying && value.duration > Duration.zero && !value.isCompleted) {
+      if (!_isReconnecting && !_hasError && _isInitialized) {
+        LogService.write('播放器非正常停止，尝试刷新');
+        _attemptReconnect();
+      }
+    }
+  }
+
+  // 断线刷新定时器（每秒检测）
+  void _startRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (_isDisposed || _controller == null || !_isInitialized) return;
+      final value = _controller!.value;
+      // 如果缓冲中且超过5秒未恢复，强制刷新
+      if (value.isBuffering) {
+        if (timer.tick > 5 && !_isReconnecting) {
+          LogService.write('缓冲超时，强制刷新');
+          _attemptReconnect();
+        }
+      }
+      // 如果播放停止且非正常结束
+      if (!value.isPlaying && !value.isCompleted && !value.isBuffering && value.duration > Duration.zero) {
+        if (!_isReconnecting) {
+          LogService.write('播放停止，尝试刷新');
+          _attemptReconnect();
+        }
+      }
     });
   }
 
-  void _createController(String url) async {
-    if (_isDisposing || !mounted) return;
-    final proxyStatus = await _getProxyStatus();
-    LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
+  void _attemptReconnect() {
+    if (_isReconnecting || _reconnectAttempts >= maxReconnectAttempts || _isDisposed) {
+      if (_reconnectAttempts >= maxReconnectAttempts) {
+        LogService.write('重连次数已达上限，停止重试');
+      }
+      return;
+    }
+    _isReconnecting = true;
+    _reconnectAttempts++;
+    LogService.write('尝试重连，第 $_reconnectAttempts 次');
+    // 强制重新初始化播放器
+    _initPlayer();
+  }
 
-    // 先释放旧的
-    _disposeController();
-    if (!mounted) return;
-
-    try {
-      _controller = VideoPlayerController.network(url)
-        ..initialize().then((_) {
-          if (!mounted || _isDisposing) return;
-          setState(() {
-            _isInitialized = true;
-            _isLoading = false;
-          });
-          _controller!.play();
-          LogService.write('视频初始化成功: $url');
-          _startSpeedMonitor();
-          _reconnectAttempts = 0;
-          _isReconnecting = false;
-        }).catchError((e) {
-          if (!mounted) return;
-          LogService.write('视频初始化失败: $e');
-          setState(() {
-            _isLoading = false;
-          });
-          widget.onError();
-          if (!_isReconnecting && !_isDisposing) {
-            _attemptReconnect();
-          }
+  void _startSpeedMonitor() {
+    _speedTimer?.cancel();
+    _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
+      if (_controller != null && _controller!.value.isInitialized) {
+        // 模拟网速（0.5-5 M/s）
+        double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
+        setState(() {
+          _speed = simulatedSpeed;
+          widget.onSpeedUpdate(simulatedSpeed);
         });
-    } catch (e) {
-      LogService.write('创建控制器异常: $e');
-      setState(() {
-        _isLoading = false;
-      });
+      }
+    });
+  }
+
+  String _extractChannelName(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+      if (segments.isNotEmpty) {
+        return segments.last.split('.').first;
+      }
+      return url;
+    } catch (_) {
+      return url;
     }
   }
 
@@ -151,50 +211,6 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     }
   }
 
-  String _extractChannelName(String url) {
-    try {
-      final uri = Uri.parse(url);
-      final segments = uri.pathSegments;
-      if (segments.isNotEmpty) {
-        return segments.last.split('.').first;
-      }
-      return url;
-    } catch (_) {
-      return url;
-    }
-  }
-
-  void _startSpeedMonitor() {
-    _speedTimer?.cancel();
-    _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      if (_controller != null && _controller!.value.isInitialized && !_isDisposing) {
-        double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
-        setState(() {
-          _speed = simulatedSpeed;
-          widget.onSpeedUpdate(simulatedSpeed);
-        });
-      }
-    });
-  }
-
-  void _attemptReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts || _isReconnecting || _isDisposing) {
-      LogService.write('重连次数过多或正在重连，停止');
-      return;
-    }
-    _isReconnecting = true;
-    _reconnectAttempts++;
-    LogService.write('尝试重连，第 $_reconnectAttempts 次');
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(seconds: 3), () {
-      if (mounted && !_isInitialized && !_isDisposing) {
-        _initPlayer(_currentUrl);
-      } else {
-        _isReconnecting = false;
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_isLoading || !_isInitialized || _controller == null) {
@@ -206,7 +222,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               CircularProgressIndicator(color: Colors.white),
               SizedBox(height: 10),
-              Text('加载中...', style: TextStyle(color: Colors.white)),
+              Text(_hasError ? '播放失败，正在重试...' : '加载中...', style: TextStyle(color: Colors.white)),
             ],
           ),
         ),
@@ -246,7 +262,14 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   @override
   void dispose() {
-    _disposeController();
+    _isDisposed = true;
+    _refreshTimer?.cancel();
+    _speedTimer?.cancel();
+    _reconnectTimer?.cancel();
+    if (_controller != null) {
+      _controller!.removeListener(_onControllerListener);
+      _controller!.dispose();
+    }
     super.dispose();
   }
 }
