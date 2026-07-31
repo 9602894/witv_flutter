@@ -27,8 +27,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   bool _isDisposed = false;
   String _currentUrl = '';
   Timer? _speedTimer;
+  Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 2;
+  static const int maxReconnectAttempts = 5;      // 增加重试次数
+  static const int initTimeoutSeconds = 3;         // 超时延长至3秒
   double _speed = 0;
 
   @override
@@ -44,12 +46,14 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     if (oldWidget.url != widget.url && !_isDisposed) {
       _currentUrl = widget.url;
       _reconnectAttempts = 0;
+      _isFailed = false;
       _initPlayer();
     }
   }
 
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
+    // 清理旧控制器
     await _controller?.stop();
     await _controller?.dispose();
     _controller = null;
@@ -58,18 +62,20 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _isFailed = false;
     setState(() {});
 
-    LogService.write('播放频道 (VLC): ${_extractChannelName(_currentUrl)}');
+    LogService.write('VLC 播放频道: ${_extractChannelName(_currentUrl)}');
 
+    // 创建控制器，网络缓存设为 800ms（平衡速度与稳定性）
     _controller = VlcPlayerController.network(
       _currentUrl,
       hwAcc: HwAcc.full,
       autoPlay: true,
       options: VlcPlayerOptions(
         advanced: VlcAdvancedOptions([
-          VlcAdvancedOptions.networkCaching(300),
+          VlcAdvancedOptions.networkCaching(800),   // 调高缓存
         ]),
         http: VlcHttpOptions([
           VlcHttpOptions.httpReconnect(true),
+          VlcHttpOptions.httpUserAgent('VLC/3.0.18'),
         ]),
       ),
     );
@@ -77,11 +83,12 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _controller!.addListener(_onControllerListener);
 
     try {
-      await _controller!.initialize().timeout(Duration(seconds: 2));
+      await _controller!.initialize().timeout(Duration(seconds: initTimeoutSeconds));
       if (_isDisposed) return;
       setState(() {
         _isInitialized = true;
         _isLoading = false;
+        _isFailed = false;
       });
       await _controller!.play();
       LogService.write('VLC 初始化成功: $_currentUrl');
@@ -89,17 +96,29 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       _reconnectAttempts = 0;
     } catch (e) {
       if (_isDisposed) return;
-      LogService.write('VLC 初始化失败: $e');
+      LogService.write('VLC 初始化失败: $e (尝试 ${_reconnectAttempts+1}/$maxReconnectAttempts)');
       setState(() {
         _isLoading = false;
         _isFailed = true;
       });
       widget.onError();
-      if (_reconnectAttempts < maxReconnectAttempts) {
-        _reconnectAttempts++;
-        Future.delayed(Duration(milliseconds: 500), _initPlayer);
-      }
+      // 自动重试，无需用户点击
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= maxReconnectAttempts) {
+      LogService.write('VLC 重试次数已达上限，停止重试');
+      setState(() => _isFailed = true);
+      return;
+    }
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(Duration(milliseconds: 800), () {
+      if (_isDisposed) return;
+      _reconnectAttempts++;
+      _initPlayer();
+    });
   }
 
   void _onControllerListener() {
@@ -109,11 +128,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       setState(() => _isLoading = false);
     }
     if (state.hasError) {
-      // 使用 errorDescription 获取错误信息
       LogService.write('VLC 播放错误: ${state.errorDescription}');
       if (_reconnectAttempts < maxReconnectAttempts) {
-        _reconnectAttempts++;
-        Future.delayed(Duration(milliseconds: 500), _initPlayer);
+        _scheduleReconnect();
       } else {
         setState(() => _isFailed = true);
       }
@@ -122,6 +139,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   void _retry() {
     _reconnectAttempts = 0;
+    _isFailed = false;
     _initPlayer();
   }
 
@@ -160,9 +178,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               Icon(Icons.error_outline, color: Colors.white70, size: 48),
               SizedBox(height: 16),
-              Text('加载失败', style: TextStyle(color: Colors.white70)),
+              Text('加载失败', style: TextStyle(color: Colors.white70, fontSize: 16)),
               SizedBox(height: 16),
-              ElevatedButton(onPressed: _retry, child: Text('重试')),
+              ElevatedButton(
+                onPressed: _retry,
+                child: Text('重试'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+              ),
             ],
           ),
         ),
@@ -178,7 +200,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             children: [
               CircularProgressIndicator(color: Colors.white),
               SizedBox(height: 10),
-              Text('加载中...', style: TextStyle(color: Colors.white)),
+              Text('加载中...', style: TextStyle(color: Colors.white, fontSize: 16)),
             ],
           ),
         ),
@@ -218,6 +240,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _controller?.stop();
     _controller?.dispose();
     _speedTimer?.cancel();
+    _reconnectTimer?.cancel();
     super.dispose();
   }
 }
