@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart'; // 用于 compute
 import 'package:dio/dio.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,6 +8,11 @@ import 'package:xml/xml.dart';
 import '../models/epg_program.dart';
 import 'log_service.dart';
 import 'config_service.dart';
+
+// 顶层函数，供 compute 调用
+Map<String, List<EpgProgram>> _parseEpgXmlIsolate(String xmlContent) {
+  return EpgParser._parseEpgXml(xmlContent);
+}
 
 class EpgParser {
   static const String epgCacheDirName = 'epgCache';
@@ -39,7 +45,6 @@ class EpgParser {
     return md5.convert(utf8.encode(content)).toString();
   }
 
-  // 检查 .hash 文件并更新
   static Future<bool> _checkHashUpdate(String epgUrl) async {
     try {
       final hashUrl = '$epgUrl.hash';
@@ -54,7 +59,6 @@ class EpgParser {
       }
 
       if (localHash != remoteHash) {
-        // 删除旧文件
         if (await hashFile.exists()) {
           final oldHash = localHash;
           final oldXml = File('${_cacheDir!.path}/epg_$oldHash.xml');
@@ -65,7 +69,6 @@ class EpgParser {
           await hashFile.delete();
         }
 
-        // 下载新 XML
         final xmlResponse = await Dio().get(epgUrl);
         final xmlContent = xmlResponse.data as String;
         final newHash = _computeHash(xmlContent);
@@ -86,6 +89,7 @@ class EpgParser {
     }
   }
 
+  // 使用 compute 异步解析 XML
   static Future<void> _loadCachedEpg() async {
     if (_programsCache != null) return;
     await _initCache();
@@ -105,7 +109,8 @@ class EpgParser {
 
     final xmlContent = await xmlFile.readAsString();
     try {
-      _programsCache = _parseEpgXml(xmlContent);
+      // 在后台 isolate 解析，避免阻塞 UI
+      _programsCache = await compute(_parseEpgXmlIsolate, xmlContent);
       await LogService.write('EPG 缓存加载成功，频道数: ${_programsCache!.length}');
     } catch (e) {
       await LogService.write('EPG 缓存解析失败: $e');
@@ -113,6 +118,7 @@ class EpgParser {
     }
   }
 
+  // 实际解析函数（静态，供顶层函数调用）
   static Map<String, List<EpgProgram>> _parseEpgXml(String xmlContent) {
     final document = XmlDocument.parse(xmlContent);
     final programs = <String, List<EpgProgram>>{};
