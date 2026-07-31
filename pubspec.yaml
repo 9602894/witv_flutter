@@ -9,7 +9,7 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 视频播放（官方）
+  # 视频播放
   video_player: ^2.8.0
 
   # 网络请求
@@ -30,8 +30,11 @@ dependencies:
   # 文件路径
   path_provider: ^2.1.2
 
-  # SVG 图标（可选）
+  # SVG 图标
   flutter_svg: ^2.0.9
+
+  # MD5 哈希计算（EPG 校验用）
+  crypto: ^3.0.0
 
 dev_dependencies:
   flutter_test:
