@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../services/log_service.dart';
@@ -36,12 +37,41 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     _initPlayer(widget.url);
   }
 
-  void _initPlayer(String url) {
+  // 检测代理状态（仅用于日志）
+  Future<String> _getProxyStatus() async {
+    try {
+      // 检测环境变量
+      final httpProxy = Platform.environment['http_proxy'] ?? Platform.environment['HTTP_PROXY'];
+      final httpsProxy = Platform.environment['https_proxy'] ?? Platform.environment['HTTPS_PROXY'];
+      if ((httpProxy != null && httpProxy.isNotEmpty) || (httpsProxy != null && httpsProxy.isNotEmpty)) {
+        return '代理 (环境变量)';
+      }
+      // 尝试从 HttpClient 获取
+      final client = HttpClient();
+      final proxy = client.findProxyFromEnvironment(Uri.parse('http://example.com'));
+      if (proxy != null && proxy.isNotEmpty && proxy != 'DIRECT') {
+        return '代理 (findProxy)';
+      }
+      // 检测 VPN 接口（简单判断）
+      final interfaces = await NetworkInterface.list(includeLinkLocal: false);
+      for (var iface in interfaces) {
+        if (iface.name.contains('tun') || iface.name.contains('ppp') || iface.name.contains('utun')) {
+          return 'VPN (虚拟接口)';
+        }
+      }
+      return '直连';
+    } catch (e) {
+      return '未知 (检测失败)';
+    }
+  }
+
+  void _initPlayer(String url) async {
     _currentUrl = url;
     _controller?.dispose();
 
-    // 仅记录频道名，网络代理由系统自动处理（包括 VPN）
-    LogService.write('播放频道: ${_extractChannelName(url)}');
+    // 获取代理状态并记录
+    final proxyStatus = await _getProxyStatus();
+    LogService.write('播放频道: ${_extractChannelName(url)}，网络状态: $proxyStatus');
 
     _controller = VideoPlayerController.network(url)
       ..initialize().then((_) {
