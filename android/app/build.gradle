@@ -52,16 +52,9 @@ android {
         }
     }
 
-    // 关键：防止打包时排除 native 库
-    packagingOptions {
-        pickFirst '**/*.so'
-    }
-
     buildTypes {
         release {
             signingConfig signingConfigs.debug
-            // 确保不压缩 native 库（可选）
-            // zipAlignEnabled true
         }
     }
 }
