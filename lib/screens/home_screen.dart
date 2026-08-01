@@ -64,15 +64,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late File _layoutConfigFile;
 
-  // ============================================================
-  // 工具函数：不涉及任何时区偏移，所有时间均为本地时间（北京时间）
-  // ============================================================
+  // ========== 工具函数：直接使用本地时间（设备已是北京时间） ==========
   DateTime _getNow() => DateTime.now();
 
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
+  /// 获取当前正在播放的节目
   EpgProgram? _getCurrentProgram(List<EpgProgram> programs) {
     final now = _getNow();
     for (var p in programs) {
@@ -83,6 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
+  /// 获取下一个节目
   EpgProgram? _getNextProgram(List<EpgProgram> programs) {
     final now = _getNow();
     EpgProgram? current = _getCurrentProgram(programs);
@@ -99,31 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  // ============================================================
-  // 将 EPG 数据转换为本地时间（仅当 isUtc == true 时执行一次）
-  // 之后所有时间均为本地时间，不再涉及 +8
-  // ============================================================
-  List<EpgProgram> _convertToLocal(List<EpgProgram> programs) {
-    return programs.map((p) {
-      DateTime start = p.start;
-      DateTime end = p.end;
-      // 如果解析出来是 UTC，则加上 8 小时变为本地时间（北京时间）
-      if (start.isUtc) {
-        start = start.add(const Duration(hours: 8));
-        end = end.add(const Duration(hours: 8));
-      }
-      return EpgProgram(
-        title: p.title,
-        start: start,
-        end: end,
-        desc: p.desc,
-      );
-    }).toList();
-  }
-
-  // ============================================================
-  // 生命周期
-  // ============================================================
+  // ========== 生命周期 ==========
   @override
   void initState() {
     super.initState();
@@ -230,18 +206,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ===== 关键：直接使用从解析器获取的数据，不做任何时区转换 =====
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
-      final converted = <String, List<EpgProgram>>{};
-      all.forEach((channel, programs) {
-        converted[channel] = _convertToLocal(programs);
-        converted[channel]?.sort((a, b) => a.start.compareTo(b.start));
-      });
+      // 直接赋值，不转换时区
       setState(() {
-        epgMap = converted;
+        epgMap = all;
       });
-      LogService.write('全量 EPG 加载完成，频道数: ${converted.length}');
+      LogService.write('全量 EPG 加载完成，频道数: ${all.length}');
     } catch (e) {
       LogService.write('加载全量 EPG 失败: $e');
     }
@@ -250,10 +223,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
-      final converted = _convertToLocal(programs);
-      converted.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
-        epgMap[channel.name] = converted;
+        epgMap[channel.name] = programs;
       });
     } catch (e) {
       LogService.write('加载频道 EPG 失败: $e');
@@ -346,9 +317,7 @@ class _HomeScreenState extends State<HomeScreen> {
     LogService.write('分组数据应用完成，分组数: ${groups.length}，频道数: ${channels.length}');
   }
 
-  // ============================================================
-  // 构建 UI
-  // ============================================================
+  // ========== 构建 UI ==========
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
