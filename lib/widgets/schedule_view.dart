@@ -63,10 +63,13 @@ class _ScheduleViewState extends State<ScheduleView> {
   }
 
   void _updateDays() {
-    final programs = widget.selectedChannel != null ? widget.epgMap[widget.selectedChannel!.name] ?? [] : [];
+    // 明确指定 List<EpgProgram> 类型
+    final List<EpgProgram> programs = widget.selectedChannel != null
+        ? (widget.epgMap[widget.selectedChannel!.name] ?? <EpgProgram>[])
+        : <EpgProgram>[];
     final days = <String>{};
     for (var prog in programs) {
-      days.add(_getDate(prog.start)); // 按日期分组
+      days.add(_getDate(prog.start));
     }
     final sorted = days.toList()..sort();
     final now = _getNow();
@@ -86,10 +89,14 @@ class _ScheduleViewState extends State<ScheduleView> {
 
   @override
   Widget build(BuildContext context) {
-    final programs = widget.selectedChannel != null ? widget.epgMap[widget.selectedChannel!.name] ?? [] : [];
+    // 明确指定 List<EpgProgram> 类型
+    final List<EpgProgram> programs = widget.selectedChannel != null
+        ? (widget.epgMap[widget.selectedChannel!.name] ?? <EpgProgram>[])
+        : <EpgProgram>[];
     List<EpgProgram> dayPrograms = [];
     if (selectedDayIndex < dayLabels.length) {
       final targetDay = dayLabels[selectedDayIndex];
+      // 这里 toList() 返回 List<EpgProgram> 因为 programs 已经是该类型
       dayPrograms = programs.where((p) => _getDate(p.start) == targetDay).toList();
     }
 
