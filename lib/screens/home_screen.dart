@@ -12,7 +12,8 @@ import '../services/log_service.dart';
 import '../models/channel.dart';
 import '../models/epg_program.dart';
 import '../models/subscription.dart';
-import '../widgets/player_widget.dart';
+// 在 HomeScreen 中
+import '../widgets/media_kit_player.dart';
 import '../widgets/channel_list.dart';
 import '../widgets/group_list.dart';
 import '../widgets/schedule_view.dart';
@@ -423,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // ---------- 播放器 ----------
             if (currentChannel != null)
               Positioned.fill(
-                child: PlayerWidget(
+                child: MediaKitPlayerWidget(
                   url: currentChannel!.url,
                   onError: () => LogService.write('播放器错误回调'),
                   onSpeedUpdate: (speed) => setState(() => currentSpeed = speed),
