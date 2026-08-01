@@ -3,7 +3,7 @@ description: 跨平台直播播放器（类酷9）
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.10.0 <4.0.0"
+  sdk: ">=3.10.0-0 <4.0.0"   # 允许预发布版本
 
 dependencies:
   flutter:
