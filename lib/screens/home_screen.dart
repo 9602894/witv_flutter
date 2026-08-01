@@ -682,7 +682,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ]),
                         ),
                         SizedBox(height: 8),
-                        _buildEpgProgramInfo(epgMap[currentChannel!.name] ?? []),
+                        _buildEpgProgramInfo(epgMap[currentChannel!.name] ?? <EpgProgram>[]),
                       ],
                     ),
                   ),
