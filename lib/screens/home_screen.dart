@@ -57,6 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double currentSpeed = 0;
   bool isLoading = true;
   bool _hasSubscriptions = false;
+  bool _isEpgUpdating = false; // 防止并发更新
 
   Map<String, List<Channel>>? _fullGroupMap;
   Timer? _epgUpdateTimer;
@@ -193,46 +194,45 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ========== EPG 更新调度 ==========
   void _initEpgScheduler() {
-    // 启动时 **不立即** 检查更新，只启动定时器（每6小时检查一次）
+    // 定时器每6小时检查一次（但不会在启动时立即执行）
     _epgUpdateTimer = Timer.periodic(Duration(hours: 6), (timer) {
       _checkEpgUpdate();
     });
   }
 
+  /// 检查 EPG 更新（静默后台执行，不阻塞 UI）
   Future<void> _checkEpgUpdate() async {
+    if (_isEpgUpdating) return;
+    _isEpgUpdating = true;
     try {
       final updated = await EpgParser.checkForUpdate();
       if (updated) {
-        LogService.write('EPG 已更新，重新加载');
-        await _loadAllEpg(); // 重新加载缓存
+        LogService.write('EPG 已更新，重新加载缓存');
+        // 重新加载 EPG 数据（仅从缓存读取）
+        await _loadAllEpg();
+        // 如果当前频道存在，刷新显示（但不强制重载）
+        if (currentChannel != null && mounted) {
+          setState(() {});
+        }
       }
     } catch (e) {
       LogService.write('EPG 更新检查失败: $e');
-    }
-  }
-
-  /// 确保某个频道的 EPG 数据可用，如果缺失当天节目则触发后台更新
-  Future<void> _ensureEpgForChannel(Channel channel) async {
-    final programs = epgMap[channel.name] ?? [];
-    // 检查当天是否有节目
-    final todayStr = _getDate(_getNow());
-    final hasToday = programs.any((p) => _getDate(p.start) == todayStr);
-    if (!hasToday) {
-      LogService.write('频道 ${channel.name} 缺少当天 EPG，触发后台更新');
-      // 触发更新（不等待完成）
-      _checkEpgUpdate();
-      // 同时尝试单独加载该频道（可能从缓存中有部分数据）
-      await _loadEpgForChannel(channel);
+    } finally {
+      _isEpgUpdating = false;
     }
   }
 
   // ============================================================
-  // 加载 EPG：仅从缓存加载，不主动下载
+  // 加载 EPG：仅从缓存加载，不触发下载
   // ============================================================
   Future<void> _loadAllEpg() async {
     try {
-      // 直接加载缓存，不触发网络请求
       final all = await EpgParser.getAllPrograms();
+      if (all.isEmpty) {
+        LogService.write('EPG 缓存为空，等待后台下载');
+        // 但不要在此触发更新，以免阻塞UI
+        return;
+      }
       final converted = <String, List<EpgProgram>>{};
       all.forEach((channel, programs) {
         final list = programs.map((p) {
@@ -291,9 +291,9 @@ class _HomeScreenState extends State<HomeScreen> {
       channels = groupChannels;
     });
     LogService.write('切换到分组: $groupName，频道数: ${channels.length}');
-    // 切换分组后，检查当前频道的 EPG
+    // 切换分组后，确保当前频道 EPG 已加载（但不触发更新）
     if (currentChannel != null) {
-      _ensureEpgForChannel(currentChannel!);
+      _loadEpgForChannel(currentChannel!);
     }
   }
 
@@ -361,11 +361,11 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       currentSubName = subName;
     });
-    // 首次加载时只加载缓存，不触发更新
+    // 加载 EPG 缓存（不阻塞）
     _loadAllEpg();
-    // 加载完EPG后，检查当前频道是否需要更新
+    // 如果当前频道存在，加载其节目数据
     if (currentChannel != null) {
-      _ensureEpgForChannel(currentChannel!);
+      _loadEpgForChannel(currentChannel!);
     }
     LogService.write('分组数据应用完成，分组数: ${groups.length}，频道数: ${channels.length}');
   }
@@ -530,10 +530,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     currentChannel = ch;
                                     _showEpgInfo = true;
                                   });
-                                  // 加载该频道 EPG 并确保数据存在
-                                  _loadEpgForChannel(ch).then((_) {
-                                    _ensureEpgForChannel(ch);
-                                  });
+                                  _loadEpgForChannel(ch);
                                   Provider.of<SettingsService>(context, listen: false)
                                       .saveLastChannel(ch.name);
                                 },
@@ -628,9 +625,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 currentChannel = ch;
                                 _showEpgInfo = true;
                               });
-                              _loadEpgForChannel(ch).then((_) {
-                                _ensureEpgForChannel(ch);
-                              });
+                              _loadEpgForChannel(ch);
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
                             },
@@ -670,9 +665,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 currentChannel = ch;
                                 _showEpgInfo = true;
                               });
-                              _loadEpgForChannel(ch).then((_) {
-                                _ensureEpgForChannel(ch);
-                              });
+                              _loadEpgForChannel(ch);
                               Provider.of<SettingsService>(context, listen: false)
                                   .saveLastChannel(ch.name);
                             },
@@ -1087,9 +1080,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // 数据初始化
+  // 数据初始化（核心修改点）
   // ============================================================
   Future<void> _init() async {
+    // 1. 先加载 EPG 缓存（如果有）
+    await EpgParser.preloadAll();
+    LogService.write('EPG 缓存已预加载（若存在）');
+
+    // 2. 加载订阅源（可能较慢，但不会阻塞 EPG 显示）
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
     if (settings.subscriptions.isEmpty) {
@@ -1108,6 +1106,12 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       isLoading = false;
     });
+
+    // 3. 后台静默更新 EPG（延迟几秒，不阻塞当前操作）
+    Future.delayed(Duration(seconds: 3), () {
+      _checkEpgUpdate();
+    });
+
     LogService.write('初始化完成');
   }
 
