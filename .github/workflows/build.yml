@@ -11,6 +11,8 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    # 仅在 push 或手动触发时创建 Release，PR 只构建不上传
+    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,17 +35,47 @@ jobs:
       - name: Build Android APK (release)
         run: flutter build apk --release
 
-      - name: Set artifact name with time and commit
-        id: set_name
+      # 获取北京时间（格式：YYYYMMDDHHMM）和 commit 短哈希
+      - name: Set environment variables
+        id: vars
         run: |
           TZ='Asia/Shanghai' date +%Y%m%d%H%M > datetime.txt
           DATETIME=$(cat datetime.txt)
           COMMIT_SHORT=$(echo ${{ github.sha }} | cut -c1-7)
-          ARTIFACT_NAME="witv-android-apk-${DATETIME}-${COMMIT_SHORT}"
+          echo "BUILD_DATETIME=$DATETIME" >> $GITHUB_ENV
+          echo "COMMIT_SHORT=$COMMIT_SHORT" >> $GITHUB_ENV
+
+      # 也可用于 artifact 命名（保留原 artifact 上传）
+      - name: Set artifact name with time and commit
+        id: set_name
+        run: |
+          ARTIFACT_NAME="witv-android-apk-${BUILD_DATETIME}-${COMMIT_SHORT}"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
-      - name: Upload Android APK
+      - name: Upload Android APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      # 上传到 GitHub Release（固定 tag 为 'latest'，每次覆盖）
+      - name: Create/Update Release and upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest                # 固定 tag，每次更新同一个 Release
+          name: "Build ${{ env.BUILD_DATETIME }} (commit ${{ env.COMMIT_SHORT }})"
+          body: |
+            ## 自动构建信息
+            - **构建时间**：${{ env.BUILD_DATETIME }} (北京时间)
+            - **提交者 ID**：`${{ env.COMMIT_SHORT }}`
+            - **触发事件**：${{ github.event_name }}
+            - **仓库**：${{ github.repository }}
+            
+            > 你可以点击右上角“Edit”按钮修改此描述或添加更多内容。
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+          generate_release_notes: false   # 不自动生成，使用自定义 body
+          prerelease: false
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
