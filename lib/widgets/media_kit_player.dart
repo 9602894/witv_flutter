@@ -21,7 +21,7 @@ class MediaKitPlayerWidget extends StatefulWidget {
 }
 
 class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
-  late Player _player;
+  Player? _player;
   VideoController? _videoController;
   bool _isInitialized = false;
   bool _isLoading = true;
@@ -44,22 +44,54 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   void initState() {
     super.initState();
     _currentUrl = widget.url;
-    _player = Player();
-    _initPlayer();
+    _ensureMediaKitInitialized().then((_) {
+      if (mounted && !_isDisposed) {
+        _player = Player();
+        _initPlayer();
+      }
+    }).catchError((e) {
+      LogService.write('MediaKit 初始化最终失败: $e');
+      if (mounted) {
+        setState(() {
+          _isFailed = true;
+          _isLoading = false;
+        });
+      }
+    });
+  }
+
+  Future<void> _ensureMediaKitInitialized() async {
+    // 先检测是否已初始化
+    try {
+      final test = Player();
+      test.dispose();
+      LogService.write('MediaKit 已初始化，无需二次操作');
+      return;
+    } catch (_) {
+      // 未初始化，尝试再次调用
+      try {
+        MediaKit.ensureInitialized();
+        LogService.write('MediaKit 二次初始化成功');
+        // 等待一小段时间确保 native 库加载
+        await Future.delayed(Duration(milliseconds: 200));
+      } catch (e) {
+        LogService.write('MediaKit 二次初始化失败: $e');
+        rethrow;
+      }
+    }
   }
 
   @override
   void didUpdateWidget(MediaKitPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url && !_isDisposed) {
+    if (oldWidget.url != widget.url && !_isDisposed && _player != null) {
       _switchToNewUrl(widget.url);
     }
   }
 
-  // ==================== 换台（无限重试，快速） ====================
+  // ==================== 换台 ====================
   Future<void> _switchToNewUrl(String newUrl) async {
-    if (_isDisposed) return;
-    // 取消旧换台
+    if (_isDisposed || _player == null) return;
     _switchCanceled = true;
     await Future.delayed(Duration(milliseconds: 100));
     _switchCanceled = false;
@@ -68,9 +100,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _isSwitching = true;
     _isReconnecting = false;
     _cancelAllTimers();
-    // 停止播放并释放资源
-    await _player.stop();
-    await _player.dispose();
+    await _player!.stop();
+    await _player!.dispose();
     _player = Player();
     _videoController = null;
     _isInitialized = false;
@@ -85,21 +116,19 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       attempt++;
       LogService.write('换台尝试 #$attempt (超时 ${switchTimeoutMs}ms)');
       try {
-        // 设置播放源
-        await _player.open(
+        await _player!.open(
           Media(newUrl),
           play: true,
         ).timeout(Duration(milliseconds: switchTimeoutMs));
         if (_isDisposed || _switchCanceled || !_isSwitching) {
-          await _player.stop();
+          await _player!.stop();
           break;
         }
-        // 成功
         _currentUrl = newUrl;
         _isInitialized = true;
         _isLoading = false;
         _isFailed = false;
-        _videoController = VideoController(_player);
+        _videoController = VideoController(_player!);
         _startSpeedMonitor();
         _startStallMonitor();
         setState(() {});
@@ -109,13 +138,11 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       } catch (e) {
         LogService.write('换台尝试 #$attempt 失败: $e');
         if (_isDisposed || _switchCanceled || !_isSwitching) break;
-        // 等待 300ms 后重试
         await Future.delayed(Duration(milliseconds: 300));
       }
     }
     _isSwitching = false;
     if (!_switchCanceled && !_isDisposed) {
-      // 彻底失败，触发重连
       setState(() {
         _isLoading = false;
         _isFailed = true;
@@ -127,9 +154,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
   // ==================== 初始化播放器 ====================
   Future<void> _initPlayer() async {
-    if (_isDisposed || _isSwitching) return;
-    await _player.stop();
-    await _player.dispose();
+    if (_isDisposed || _isSwitching || _player == null) return;
+    await _player!.stop();
+    await _player!.dispose();
     _player = Player();
     _videoController = null;
     _isInitialized = false;
@@ -142,7 +169,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     LogService.write('加载频道: ${_extractChannelName(_currentUrl)}');
 
     try {
-      await _player.open(
+      await _player!.open(
         Media(_currentUrl),
         play: true,
       ).timeout(Duration(milliseconds: switchTimeoutMs));
@@ -150,7 +177,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       _isInitialized = true;
       _isLoading = false;
       _isFailed = false;
-      _videoController = VideoController(_player);
+      _videoController = VideoController(_player!);
       _startSpeedMonitor();
       _startStallMonitor();
       setState(() {});
@@ -158,8 +185,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     } catch (e) {
       if (_isDisposed) return;
       LogService.write('加载失败: $e');
-      await _player.stop();
-      await _player.dispose();
+      await _player!.stop();
+      await _player!.dispose();
       _player = Player();
       setState(() {
         _isLoading = false;
@@ -172,7 +199,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
   // ==================== 断线重连 ====================
   void _startReconnect() {
-    if (_isDisposed || _isSwitching) return;
+    if (_isDisposed || _isSwitching || _player == null) return;
     if (_isReconnecting) return;
     _isReconnecting = true;
     _cancelAllTimers();
@@ -201,9 +228,11 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
   // ==================== 监控 ====================
   void _startStallMonitor() {
+    if (_player == null) return;
     _stallMonitorTimer?.cancel();
     _stallMonitorTimer = Timer.periodic(Duration(seconds: 5), (timer) {
-      if (_player.state.buffering && !_player.state.playing && !_isLoading) {
+      if (_player == null || _isDisposed) return;
+      if (_player!.state.buffering && !_player!.state.playing && !_isLoading) {
         LogService.write('检测到卡在缓冲，触发重连');
         if (!_isSwitching && !_isReconnecting) {
           _startReconnect();
@@ -215,7 +244,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
     _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
-      // media_kit 可通过 _player.state 获取实际码率，此处模拟
       double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
       setState(() => _speed = simulatedSpeed);
       widget.onSpeedUpdate(simulatedSpeed);
@@ -238,7 +266,16 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _switchCanceled = true;
     _isSwitching = false;
     _isReconnecting = false;
-    _initPlayer();
+    _ensureMediaKitInitialized().then((_) {
+      if (mounted && !_isDisposed) {
+        _player = Player();
+        _initPlayer();
+      }
+    }).catchError((e) {
+      if (mounted) {
+        setState(() => _isFailed = true);
+      }
+    });
   }
 
   @override
@@ -308,8 +345,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _switchCanceled = true;
     _isSwitching = false;
     _cancelAllTimers();
-    _player.stop();
-    _player.dispose();
+    _player?.stop();
+    _player?.dispose();
+    _player = null;
     super.dispose();
   }
 }
