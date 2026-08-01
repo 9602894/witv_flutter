@@ -19,11 +19,9 @@ Map<String, List<EpgProgram>> _filterEpgIsolate(
     Map<String, List<EpgProgram>> fullMap, List<String> channelNames) {
   final result = <String, List<EpgProgram>>{};
   for (var name in channelNames) {
-    // 精确匹配
     if (fullMap.containsKey(name)) {
       result[name] = fullMap[name]!;
     } else {
-      // 模糊匹配
       for (var key in fullMap.keys) {
         if (key.contains(name) || name.contains(key)) {
           result[name] = fullMap[key]!;
@@ -129,7 +127,6 @@ class EpgParser {
 
     final xmlContent = await xmlFile.readAsString();
     try {
-      // 在后台 isolate 解析全量
       _programsCache = await compute(_parseEpgXmlIsolate, xmlContent);
       await LogService.write('EPG 缓存加载成功，频道数: ${_programsCache!.length}');
     } catch (e) {
@@ -186,8 +183,11 @@ class EpgParser {
     return programs;
   }
 
+  /// 解析 XMLTV 时间字符串（格式：YYYYMMDDHHMMSS + 时区）
+  /// 直接返回本地时间（北京时间），不做任何时区转换
   static DateTime? _parseDateTime(String str) {
     try {
+      // 提取日期时间部分（前14位）
       String dateStr = str.substring(0, 14);
       int year = int.parse(dateStr.substring(0, 4));
       int month = int.parse(dateStr.substring(4, 6));
@@ -195,7 +195,8 @@ class EpgParser {
       int hour = int.parse(dateStr.substring(8, 10));
       int minute = int.parse(dateStr.substring(10, 12));
       int second = int.parse(dateStr.substring(12, 14));
-      return DateTime.utc(year, month, day, hour, minute, second);
+      // 直接使用本地时间构造，不添加时区偏移
+      return DateTime(year, month, day, hour, minute, second);
     } catch (_) {
       return null;
     }
@@ -210,7 +211,6 @@ class EpgParser {
     return await _checkHashUpdate(url);
   }
 
-  // 获取某个频道的 EPG（按需）
   static Future<List<EpgProgram>> getProgramsForChannel(String channelName) async {
     await _initCache();
     if (_programsCache == null) {
@@ -230,7 +230,6 @@ class EpgParser {
     return [];
   }
 
-  // ★ 新方法：获取当前分组频道的 EPG（优先解析）
   static Future<Map<String, List<EpgProgram>>> getGroupPrograms(
       List<String> channelNames) async {
     await _initCache();
@@ -239,11 +238,9 @@ class EpgParser {
     }
     if (_programsCache == null) return {};
 
-    // 从全量中过滤出当前分组的频道
     return _filterEpgIsolate(_programsCache!, channelNames);
   }
 
-  // 获取全量 EPG（后台静默加载）
   static Future<Map<String, List<EpgProgram>>> getAllPrograms() async {
     await _initCache();
     if (_programsCache == null) {
