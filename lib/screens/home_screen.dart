@@ -64,10 +64,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late File _layoutConfigFile;
 
-  // ========== 工具函数：获取当前节目和下一节目（基于北京时间，即本地时间） ==========
-  /// 获取当前正在播放的节目（EPG 时间已是北京时间）
+  // ========== 工具函数：直接使用当前北京时间（设备时间） ==========
+  /// 获取当前时间（设备时区即为北京时间）
+  DateTime _getNow() => DateTime.now();
+
+  /// 格式化时间为 HH:mm
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 获取当前正在播放的节目
   EpgProgram? _getCurrentProgram(List<EpgProgram> programs) {
-    final now = DateTime.now(); // 设备本地时间（北京时间）
+    final now = _getNow();
     for (var p in programs) {
       if (p.start.isBefore(now) && p.end.isAfter(now)) {
         return p;
@@ -76,9 +84,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  /// 获取下一个即将播放的节目
+  /// 获取下一个节目
   EpgProgram? _getNextProgram(List<EpgProgram> programs) {
-    final now = DateTime.now();
+    final now = _getNow();
     EpgProgram? current = _getCurrentProgram(programs);
     if (current == null) {
       for (var p in programs) {
@@ -651,7 +659,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- EPG 信息浮窗（已修复：动态显示当前/下一节目） ----------
+            // ---------- EPG 信息浮窗（动态筛选） ----------
             if (_showEpgInfo && currentChannel != null)
               Positioned(
                 left: 0,
@@ -812,7 +820,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ========== EPG 信息项 ==========
   Widget _buildEpgItem(EpgProgram prog, String label) {
-    final timeStr = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')}';
+    final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
