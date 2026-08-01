@@ -5,14 +5,14 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../services/log_service.dart';
 
-/// MediaKit 播放器组件（Xtream Codes IPTV 专用修复版）
+/// MediaKit 播放器组件（音频修复版）
 ///
 /// 核心修复：
-/// 1. **PlaylistMode.single**：completed 时自动循环播放，而不是停止。这是 IPTV 流的关键设置。
-/// 2. **移除 completed 重连**：completed 对直播流是正常行为（服务器断开），mpv 自己循环即可。
-/// 3. **只监听 error 流**：真正的断线（服务器彻底挂了）才会触发 error，这时才需要 Flutter 层重连。
-/// 4. **心跳检测放宽**：playing=true 时完全信任，不检查 position。
-/// 5. **单 Player 复用**：换台不重建，VideoController 终身绑定。
+/// 1. **音频轨道自动选择**：监听 tracks.audio，当可用音轨列表更新时，自动选择第一个有效音轨
+/// 2. **音量强制 100**：每次加载/重连后设置 volume=100，避免默认静音
+/// 3. **音频设备自动**：设置 AudioDevice.auto()，确保走正确的音频输出
+/// 4. **音频参数监控**：监听 audioParams 和 audioBitrate，确认音频解码正常
+/// 5. **音频通道设置**：mpv 底层设置 audio-channels=stereo，避免多声道解码失败
 class MediaKitPlayerWidget extends StatefulWidget {
   final String url;
   final VoidCallback onError;
@@ -71,7 +71,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   // 画面过渡
   double _videoOpacity = 1.0;
 
-  // 重连控制（只由 error 触发）
+  // 重连控制
   bool _isReconnecting = false;
   int _reconnectAttempt = 0;
   Timer? _reconnectTimer;
@@ -79,7 +79,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   // Stream 订阅
   final List<StreamSubscription> _subscriptions = [];
 
-  // 心跳检测（仅备用）
+  // 心跳检测
   DateTime _lastPositionUpdate = DateTime.now();
   DateTime _lastBufferUpdate = DateTime.now();
   Timer? _heartbeatTimer;
@@ -99,6 +99,10 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   // 硬件解码闪烁检测
   int _hwdecErrorCount = 0;
   static const int _hwdecErrorThreshold = 3;
+
+  // 音频轨道修复
+  List<AudioTrack> _availableAudioTracks = [];
+  bool _audioTrackSelected = false;
 
   // ========== 常量配置 ==========
   static const int switchTimeoutMs = 4000;
@@ -164,14 +168,14 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     return _channelMemory.putIfAbsent(key, () => _ChannelConfig());
   }
 
-  // ==================== mpv 底层优化配置 ====================
+  // ==================== mpv 底层优化配置（含音频修复） ====================
 
   Future<void> _applyMpvOptimizations(Player player, _ChannelConfig config) async {
     if (player.platform is! NativePlayer) return;
     final native = player.platform as NativePlayer;
 
     try {
-      // 换台加速（保守值）
+      // 换台加速
       await native.setProperty('demuxer-lavf-analyzeduration', '0.5');
       await native.setProperty('demuxer-lavf-probesize', '131072');
 
@@ -194,6 +198,18 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       final hwdec = config.useHwdec ? 'auto-safe' : 'no';
       await native.setProperty('hwdec', hwdec);
 
+      // ===== 音频修复参数 =====
+      // 强制立体声输出，避免多声道解码失败
+      await native.setProperty('audio-channels', 'stereo');
+      // 音频采样格式自动
+      await native.setProperty('audio-format', 'auto');
+      // 音频采样率自动
+      await native.setProperty('audio-samplerate', '0');
+      // 禁用音频标准化（某些源会导致音量异常）
+      await native.setProperty('volume-normalize', 'no');
+      // 音频缓冲
+      await native.setProperty('audio-buffer', '0.2');
+
       // 网络超时与 mpv 内部重连
       await native.setProperty('network-timeout', '10');
       await native.setProperty('reconnect', 'yes');
@@ -204,7 +220,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       // 直播流优化
       await native.setProperty('demuxer-hysteresis-secs', '5');
 
-      LogService.write('mpv 优化: hwdec=$hwdec');
+      LogService.write('mpv 优化: hwdec=$hwdec, audio-channels=stereo');
     } catch (e) {
       LogService.write('mpv 优化部分失败: $e');
     }
@@ -218,6 +234,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
     _cancelReconnect();
     _clearSubscriptions();
+    _audioTrackSelected = false;
+    _availableAudioTracks = [];
 
     if (!isReconnect) {
       setState(() {
@@ -243,9 +261,14 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       await _player!.stop();
       await Future.delayed(const Duration(milliseconds: 150));
       await _applyMpvOptimizations(_player!, config);
-
-      // 【关键修复】设置单曲循环，completed 时自动重新播放而不是停止
       await _player!.setPlaylistMode(PlaylistMode.single);
+
+      // 【音频修复】设置音频设备为自动
+      await _player!.setAudioDevice(AudioDevice.auto());
+      // 【音频修复】设置音量为 100（避免默认静音）
+      await _player!.setVolume(100.0);
+      // 【音频修复】音频轨道设为自动
+      await _player!.setAudioTrack(AudioTrack.auto());
 
       await _player!.open(Media(url), play: true)
           .timeout(const Duration(milliseconds: switchTimeoutMs));
@@ -281,6 +304,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _isReconnecting = false;
     _reconnectAttempt = 0;
     _hwdecErrorCount = 0;
+    _audioTrackSelected = false;
+    _availableAudioTracks = [];
 
     config.onSuccess();
 
@@ -309,6 +334,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _cancelAllTimers();
     _clearSubscriptions();
     _fadeOutVideo();
+    _audioTrackSelected = false;
+    _availableAudioTracks = [];
 
     setState(() {
       _isLoading = true;
@@ -337,6 +364,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         await Future.delayed(const Duration(milliseconds: 150));
         await _applyMpvOptimizations(_player!, config);
         await _player!.setPlaylistMode(PlaylistMode.single);
+        await _player!.setAudioDevice(AudioDevice.auto());
+        await _player!.setVolume(100.0);
+        await _player!.setAudioTrack(AudioTrack.auto());
         await _player!.open(Media(newUrl), play: true)
             .timeout(const Duration(milliseconds: switchTimeoutMs));
 
@@ -400,18 +430,17 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }
   }
 
-  // ==================== Stream 监听器（关键修复） ====================
+  // ==================== Stream 监听器（含音频修复） ====================
 
   void _setupPlayerListeners() {
     _clearSubscriptions();
     if (_player == null) return;
 
-    // 1. 错误流 —— 唯一触发重连的来源
+    // 1. 错误流
     _subscriptions.add(_player!.stream.error.listen((error) {
       if (error.isNotEmpty && !_isSwitching && !_isReconnecting) {
         LogService.write('Player error: $error');
 
-        // 检测硬件解码错误
         final lowerError = error.toLowerCase();
         if (lowerError.contains('hwdec') ||
             lowerError.contains('hardware') ||
@@ -454,7 +483,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // 5. 缓冲位置 —— 用于网速估算
+    // 5. 缓冲位置
     _subscriptions.add(_player!.stream.buffer.listen((buffer) {
       _lastBufferUpdate = DateTime.now();
       _updateSpeedFromBuffer(buffer);
@@ -467,12 +496,10 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // 7. 【关键修复】completed 流：只记录日志，不触发重连
-    // PlaylistMode.single 会让 mpv 自动循环播放，completed 是正常行为
+    // 7. completed 流
     _subscriptions.add(_player!.stream.completed.listen((completed) {
       if (completed) {
         LogService.write('completed=true（PlaylistMode.single 已自动循环）');
-        // 不触发重连！mpv 自己处理
       }
     }));
 
@@ -480,9 +507,70 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _subscriptions.add(_player!.stream.log.listen((_) {
       _lastPositionUpdate = DateTime.now();
     }));
+
+    // ===== 【音频修复】9. 音频轨道监听 =====
+    _subscriptions.add(_player!.stream.tracks.listen((tracks) {
+      final audios = tracks.audio;
+      if (audios.isNotEmpty && audios != _availableAudioTracks) {
+        _availableAudioTracks = audios;
+        LogService.write('检测到 ${audios.length} 个音频轨道');
+        for (final t in audios) {
+          LogService.write('  音轨: id=${t.id}, title=${t.title}, lang=${t.language}, codec=${t.codec}');
+        }
+
+        // 如果还没有选择音轨，选择第一个非 "no" 的音轨
+        if (!_audioTrackSelected && audios.length > 1) {
+          // 跳过第一个 "no" 选项，选第二个（即第一个真实音轨）
+          final firstReal = audios.firstWhere(
+            (t) => t.id != 'no',
+            orElse: () => audios.first,
+          );
+          if (firstReal.id != 'no') {
+            LogService.write('自动选择音频轨道: ${firstReal.title ?? firstReal.id}');
+            _player!.setAudioTrack(firstReal);
+            _audioTrackSelected = true;
+          }
+        }
+      }
+    }));
+
+    // ===== 【音频修复】10. 当前音轨监听 =====
+    _subscriptions.add(_player!.stream.track.listen((track) {
+      final audio = track.audio;
+      LogService.write('当前音轨: id=${audio.id}, title=${audio.title}');
+      if (audio.id == 'no' || audio.id == 'auto') {
+        // 如果当前是 no/auto，且已经有可用音轨列表，尝试重新选择
+        if (_availableAudioTracks.isNotEmpty) {
+          final firstReal = _availableAudioTracks.firstWhere(
+            (t) => t.id != 'no' && t.id != 'auto',
+            orElse: () => _availableAudioTracks.first,
+          );
+          if (firstReal.id != 'no') {
+            LogService.write('重新选择音频轨道: ${firstReal.title ?? firstReal.id}');
+            _player!.setAudioTrack(firstReal);
+          }
+        }
+      }
+    }));
+
+    // ===== 【音频修复】11. 音频参数监听 =====
+    _subscriptions.add(_player!.stream.audioParams.listen((params) {
+      if (params != null) {
+        LogService.write('音频参数: rate=${params.sampleRate}, channels=${params.channels}, format=${params.format}');
+      }
+    }));
+
+    // ===== 【音频修复】12. 音量监听 =====
+    _subscriptions.add(_player!.stream.volume.listen((volume) {
+      LogService.write('当前音量: $volume');
+      if (volume < 1.0) {
+        LogService.write('音量过低，重置为 100');
+        _player!.setVolume(100.0);
+      }
+    }));
   }
 
-  // ==================== 心跳检测（仅备用） ====================
+  // ==================== 心跳检测 ====================
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
@@ -499,14 +587,12 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         final positionStall = now.difference(_lastPositionUpdate);
         final bufferStall = now.difference(_lastBufferUpdate);
 
-        // 如果正在播放，完全信任，不判定断线
         if (_heartbeatPlaying) {
           _lastPositionUpdate = now;
           _lastBufferUpdate = now;
           return;
         }
 
-        // 只有 position 和 buffer 都长时间停滞，且不在播放中，才判定断线
         if (positionStall > const Duration(seconds: maxStallSec) &&
             bufferStall > const Duration(seconds: maxStallSec)) {
           LogService.write(
@@ -518,7 +604,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     );
   }
 
-  // ==================== 断线重连（只由 error/heartbeat 触发） ====================
+  // ==================== 断线重连 ====================
 
   void _handleConnectionLost() {
     if (_isDisposed || _isSwitching || _isReconnecting) return;
@@ -534,6 +620,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _cancelAllTimers();
     _clearSubscriptions();
     _fadeOutVideo();
+    _audioTrackSelected = false;
+    _availableAudioTracks = [];
 
     LogService.write('启动断线重连');
     _attemptReconnect(url);
@@ -580,6 +668,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         await Future.delayed(const Duration(milliseconds: 150));
         await _applyMpvOptimizations(_player!, config);
         await _player!.setPlaylistMode(PlaylistMode.single);
+        await _player!.setAudioDevice(AudioDevice.auto());
+        await _player!.setVolume(100.0);
+        await _player!.setAudioTrack(AudioTrack.auto());
         await _player!.open(Media(url), play: true)
             .timeout(const Duration(milliseconds: switchTimeoutMs));
 
