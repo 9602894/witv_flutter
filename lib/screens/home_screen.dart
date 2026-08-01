@@ -64,16 +64,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late File _layoutConfigFile;
 
-  // ========== 工具函数 ==========
-  /// 获取当前时间（设备时区即为北京时间）
+  // ============================================================
+  // 工具函数：不涉及任何时区偏移，所有时间均为本地时间（北京时间）
+  // ============================================================
   DateTime _getNow() => DateTime.now();
 
-  /// 格式化时间为 HH:mm
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
-  /// 获取当前正在播放的节目
   EpgProgram? _getCurrentProgram(List<EpgProgram> programs) {
     final now = _getNow();
     for (var p in programs) {
@@ -84,7 +83,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  /// 获取下一个节目
   EpgProgram? _getNextProgram(List<EpgProgram> programs) {
     final now = _getNow();
     EpgProgram? current = _getCurrentProgram(programs);
@@ -101,15 +99,18 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  /// 将 UTC 时间转换为东八区本地时间（如果已经是本地则不变）
-  List<EpgProgram> _convertToBeijingTime(List<EpgProgram> programs) {
+  // ============================================================
+  // 将 EPG 数据转换为本地时间（仅当 isUtc == true 时执行一次）
+  // 之后所有时间均为本地时间，不再涉及 +8
+  // ============================================================
+  List<EpgProgram> _convertToLocal(List<EpgProgram> programs) {
     return programs.map((p) {
       DateTime start = p.start;
       DateTime end = p.end;
+      // 如果解析出来是 UTC，则加上 8 小时变为本地时间（北京时间）
       if (start.isUtc) {
-        // 如果是 UTC，加 8 小时转为东八区本地时间
-        start = start.add(Duration(hours: 8));
-        end = end.add(Duration(hours: 8));
+        start = start.add(const Duration(hours: 8));
+        end = end.add(const Duration(hours: 8));
       }
       return EpgProgram(
         title: p.title,
@@ -120,7 +121,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
   }
 
-  // ========== 生命周期 ==========
+  // ============================================================
+  // 生命周期
+  // ============================================================
   @override
   void initState() {
     super.initState();
@@ -230,11 +233,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
-      // 将所有 EPG 时间转换为北京时间本地时间（如果已是本地则不变）
       final converted = <String, List<EpgProgram>>{};
       all.forEach((channel, programs) {
-        converted[channel] = _convertToBeijingTime(programs);
-        // 按开始时间排序（确保节目顺序正确）
+        converted[channel] = _convertToLocal(programs);
         converted[channel]?.sort((a, b) => a.start.compareTo(b.start));
       });
       setState(() {
@@ -249,8 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
-      // 转换时间并排序
-      final converted = _convertToBeijingTime(programs);
+      final converted = _convertToLocal(programs);
       converted.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
         epgMap[channel.name] = converted;
@@ -346,7 +346,9 @@ class _HomeScreenState extends State<HomeScreen> {
     LogService.write('分组数据应用完成，分组数: ${groups.length}，频道数: ${channels.length}');
   }
 
-  // ========== 构建 UI ==========
+  // ============================================================
+  // 构建 UI
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
@@ -553,7 +555,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ---------- 节目单模式（三列） ----------
+            // ---------- 节目单模式 ----------
             if (isScheduleMode)
               Positioned(
                 left: 0,
@@ -829,7 +831,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 构建 EPG 信息（浮窗内容） ==========
+  // ============================================================
+  // 辅助构建方法
+  // ============================================================
   Widget _buildEpgProgramInfo(List<EpgProgram> programs) {
     final current = _getCurrentProgram(programs);
     final next = _getNextProgram(programs);
@@ -847,7 +851,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(children: children);
   }
 
-  // ========== EPG 信息项 ==========
   Widget _buildEpgItem(EpgProgram prog, String label) {
     final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
     return Column(
@@ -872,7 +875,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 订阅源列表 ==========
   Widget _buildSubscriptionList() {
     final settings = Provider.of<SettingsService>(context);
     final subs = settings.subscriptions;
@@ -921,7 +923,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 分组列表 ==========
   Widget _buildGroupList() {
     return Container(
       color: Colors.transparent,
@@ -949,7 +950,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 拖拽条 ==========
   Widget _buildDragBar({required Function(double delta) onDrag, required bool isEditMode}) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -964,7 +964,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 菜单项 ==========
   Widget _buildMenuItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -982,7 +981,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ========== 添加订阅源对话框 ==========
+  // ============================================================
+  // 添加订阅源对话框
+  // ============================================================
   void _showAddSubscriptionDialog() {
     final nameCtrl = TextEditingController();
     final urlCtrl = TextEditingController();
@@ -1054,7 +1055,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 数据加载 =====
+  // ============================================================
+  // 数据初始化
+  // ============================================================
   Future<void> _init() async {
     await _loadSavedSubscriptions();
     final settings = Provider.of<SettingsService>(context, listen: false);
