@@ -163,7 +163,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       } else {
         await native.setProperty('demuxer-lavf-analyzeduration', '0.3');
         await native.setProperty('demuxer-lavf-probesize', '65536');
-        await native.setProperty('force-seekable', 'no'); // 直播统一 no
+        await native.setProperty('force-seekable', 'no'); // 统一 no
       }
 
       // 通用缓存
@@ -222,7 +222,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       await _player!.stop();
       await Future.delayed(const Duration(milliseconds: 150));
       await _applyMpvOptimizations(_player!, config);
-      // 移除 PlaylistMode.single
+      // 已移除 PlaylistMode.single
       await _player!.setAudioDevice(AudioDevice.auto());
       await _player!.setVolume(100.0);
       await _player!.setAudioTrack(AudioTrack.auto());
@@ -315,7 +315,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         _isSwitching = false;
         return;
       } catch (e) {
-        LogService.write('换台 #$attempt 失败 [$newFormat]: $e');
+        // 修正：使用 _currentFormat 而非 newFormat
+        LogService.write('换台 #$attempt 失败 [$_currentFormat]: $e');
         config.onFail();
         if (_isDisposed || _switchCanceled) break;
         if (config.useHwdec && attempt < maxSwitchAttempts) {
@@ -343,7 +344,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   void _resetTrackState() {
     _availableAudioTracks = [];
     _availableVideoTracks = [];
-    // 保留 _audioTrackSelected / _videoTrackSelected 状态
+    // 保留选择标志
   }
 
   void _setupPlayerListeners() {
@@ -391,7 +392,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }));
     _subscriptions.add(_player!.stream.log.listen((_) { _lastPositionUpdate = DateTime.now(); }));
 
-    // 音视频轨道监听（修正：移除 width/height）
+    // 音视频轨道监听（移除 width/height）
     _subscriptions.add(_player!.stream.tracks.listen((tracks) {
       final audios = tracks.audio;
       if (audios.isNotEmpty && audios != _availableAudioTracks) {
@@ -415,7 +416,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         _availableVideoTracks = videos;
         LogService.write('检测到 ${videos.length} 个视频轨道');
         for (final t in videos) {
-          // 修正：移除 width/height，只打印安全属性
           LogService.write('  视频轨: id=${t.id}, title=${t.title}, codec=${t.codec}');
         }
         if (!_videoTrackSelected && videos.length > 1) {
@@ -461,7 +461,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // 修正：VideoParams 在 1.2.6 中没有 width/height/frameRate/codec，直接打印对象
     _subscriptions.add(_player!.stream.videoParams.listen((params) {
       if (params != null) {
         LogService.write('视频参数: $params');
@@ -494,7 +493,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         if (_heartbeatPlaying) {
           _lastPositionUpdate = now;
           _lastBufferUpdate = now;
-          // 通用软刷新（不再限制格式）
+          // 通用软刷新
           if (positionStall > const Duration(seconds: softRefreshStallSec) &&
               bufferStall > const Duration(seconds: softRefreshStallSec)) {
             LogService.write('软刷新: playing=true 但 position停${positionStall.inSeconds}s');
