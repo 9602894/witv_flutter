@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:media_kit/media_kit.dart';  // 添加导入
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
 import 'services/log_service.dart';
@@ -8,6 +9,9 @@ import 'services/log_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
+
+  // 初始化 media_kit（必须在任何 media_kit API 之前调用）
+  MediaKit.ensureInitialized();
 
   // 强制横屏（锁定左右横屏）
   await SystemChrome.setPreferredOrientations([
