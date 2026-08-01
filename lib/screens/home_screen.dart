@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late File _layoutConfigFile;
 
-  // ========== 工具函数：直接使用当前北京时间（设备时间） ==========
+  // ========== 工具函数 ==========
   /// 获取当前时间（设备时区即为北京时间）
   DateTime _getNow() => DateTime.now();
 
@@ -99,6 +99,25 @@ class _HomeScreenState extends State<HomeScreen> {
       return programs[index + 1];
     }
     return null;
+  }
+
+  /// 将 UTC 时间转换为东八区本地时间（如果已经是本地则不变）
+  List<EpgProgram> _convertToBeijingTime(List<EpgProgram> programs) {
+    return programs.map((p) {
+      DateTime start = p.start;
+      DateTime end = p.end;
+      if (start.isUtc) {
+        // 如果是 UTC，加 8 小时转为东八区本地时间
+        start = start.add(Duration(hours: 8));
+        end = end.add(Duration(hours: 8));
+      }
+      return EpgProgram(
+        title: p.title,
+        start: start,
+        end: end,
+        desc: p.desc,
+      );
+    }).toList();
   }
 
   // ========== 生命周期 ==========
@@ -211,10 +230,17 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
-      setState(() {
-        epgMap = all;
+      // 将所有 EPG 时间转换为北京时间本地时间（如果已是本地则不变）
+      final converted = <String, List<EpgProgram>>{};
+      all.forEach((channel, programs) {
+        converted[channel] = _convertToBeijingTime(programs);
+        // 按开始时间排序（确保节目顺序正确）
+        converted[channel]?.sort((a, b) => a.start.compareTo(b.start));
       });
-      LogService.write('全量 EPG 加载完成，频道数: ${all.length}');
+      setState(() {
+        epgMap = converted;
+      });
+      LogService.write('全量 EPG 加载完成，频道数: ${converted.length}');
     } catch (e) {
       LogService.write('加载全量 EPG 失败: $e');
     }
@@ -223,8 +249,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
+      // 转换时间并排序
+      final converted = _convertToBeijingTime(programs);
+      converted.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
-        epgMap[channel.name] = programs;
+        epgMap[channel.name] = converted;
       });
     } catch (e) {
       LogService.write('加载频道 EPG 失败: $e');
