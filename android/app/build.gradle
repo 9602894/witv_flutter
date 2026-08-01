@@ -24,8 +24,8 @@ if (flutterVersionName == null) {
 
 android {
     namespace 'com.whyun.witv'
-    compileSdk 36
-    ndkVersion "28.2.13676358"
+    compileSdk 34   // 降低到 34，提高兼容性
+    // 移除 ndkVersion，让系统自动选择
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -43,7 +43,7 @@ android {
     defaultConfig {
         applicationId "com.whyun.witv"
         minSdk 21
-        targetSdk 36
+        targetSdk 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
 
