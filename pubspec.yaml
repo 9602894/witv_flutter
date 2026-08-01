@@ -3,37 +3,20 @@ description: 跨平台直播播放器（类酷9）
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"   # 更新以匹配 video_player 要求
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # 视频播放（官方，最稳定）
   video_player: ^2.13.0
-
-  # 网络请求
   dio: ^5.4.0
-
-  # XML 解析
   xml: ^6.5.0
-
-  # JSON 序列化
   json_annotation: ^4.8.1
-
-  # 本地存储
   shared_preferences: ^2.2.2
-
-  # 状态管理
   provider: ^6.1.1
-
-  # 文件路径
   path_provider: ^2.1.2
-
-  # SVG 图标
   flutter_svg: ^2.0.9
-
-  # MD5 哈希
   crypto: ^3.0.0
 
 dev_dependencies:
