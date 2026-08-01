@@ -18,7 +18,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.0'   # 升级到满足 video_player ^2.13.0 的版本
+          flutter-version: '3.44.8'   # 使用明确的稳定版本
           channel: 'stable'
 
       - name: Clean pub cache
@@ -36,7 +36,6 @@ jobs:
       - name: Set artifact name with time and commit
         id: set_name
         run: |
-          # 获取北京时间 (UTC+8)
           TZ='Asia/Shanghai' date +%Y%m%d%H%M > datetime.txt
           DATETIME=$(cat datetime.txt)
           COMMIT_SHORT=$(echo ${{ github.sha }} | cut -c1-7)
