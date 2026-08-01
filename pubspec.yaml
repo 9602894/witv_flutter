@@ -1,15 +1,13 @@
-name: witv_flutter
-description: 跨平台直播播放器（类酷9）
-version: 1.0.0+1
-
-environment:
-  sdk: ">=3.10.0-0 <4.0.0"   # 允许预发布版本
-
 dependencies:
   flutter:
     sdk: flutter
 
-  video_player: ^2.13.0
+  # 移除 video_player，改用 media_kit
+  media_kit: ^1.2.6
+  media_kit_video: ^1.2.4
+  media_kit_native_event_loop: ^1.0.8  # Android/iOS 必需
+
+  # 其他依赖不变...
   dio: ^5.4.0
   xml: ^6.5.0
   json_annotation: ^4.8.1
