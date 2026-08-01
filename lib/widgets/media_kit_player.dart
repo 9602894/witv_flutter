@@ -5,14 +5,16 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../services/log_service.dart';
 
-/// MediaKit 播放器组件（音频修复版）
+/// MediaKit 播放器组件（MPEG-TS 专用深度优化版）
 ///
-/// 核心修复：
-/// 1. **音频轨道自动选择**：监听 tracks.audio，当可用音轨列表更新时，自动选择第一个有效音轨
-/// 2. **音量强制 100**：每次加载/重连后设置 volume=100，避免默认静音
-/// 3. **音频设备自动**：设置 AudioDevice.auto()，确保走正确的音频输出
-/// 4. **音频参数监控**：监听 audioParams 和 audioBitrate，确认音频解码正常
-/// 5. **音频通道设置**：mpv 底层设置 audio-channels=stereo，避免多声道解码失败
+/// 针对 TS 流的核心优化：
+/// 1. **视频轨道自动选择**：和音频一样，监听 tracks.video，自动选择第一个有效视频轨道
+/// 2. **强制指定 mpegts 格式**：demuxer-lavf-format=mpegts，避免格式探测失败
+/// 3. **禁用 seek**：force-seekable=no，直播流 seek 会导致画面卡住
+/// 4. **关键帧策略**：vd-lavc-skiploopfilter=nonref 降低 CPU，vd-lavc-threads=4 多线程解码
+/// 5. **软刷新机制**：检测到 playing=true 但 position 3 秒不更新，自动 stop+open 刷新
+/// 6. **换台超时放宽**：TS 流分析慢，超时从 4s 改为 5s，给 demuxer 足够时间
+/// 7. **单 Player 复用**：VideoController 终身绑定，换台不重建
 class MediaKitPlayerWidget extends StatefulWidget {
   final String url;
   final VoidCallback onError;
@@ -79,11 +81,12 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   // Stream 订阅
   final List<StreamSubscription> _subscriptions = [];
 
-  // 心跳检测
+  // 心跳检测 + 软刷新
   DateTime _lastPositionUpdate = DateTime.now();
   DateTime _lastBufferUpdate = DateTime.now();
   Timer? _heartbeatTimer;
   bool _heartbeatPlaying = false;
+  bool _softRefreshing = false;
 
   // 网速监控
   double _speed = 0;
@@ -100,17 +103,20 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   int _hwdecErrorCount = 0;
   static const int _hwdecErrorThreshold = 3;
 
-  // 音频轨道修复
+  // 音视频轨道修复
   List<AudioTrack> _availableAudioTracks = [];
+  List<VideoTrack> _availableVideoTracks = [];
   bool _audioTrackSelected = false;
+  bool _videoTrackSelected = false;
 
   // ========== 常量配置 ==========
-  static const int switchTimeoutMs = 4000;
+  static const int switchTimeoutMs = 5000; // TS 流分析慢，放宽到 5s
   static const int maxSwitchAttempts = 3;
   static const int reconnectBaseDelayMs = 3000;
   static const int maxReconnectAttempts = 10;
-  static const int heartbeatIntervalSec = 5;
-  static const int maxStallSec = 15;
+  static const int heartbeatIntervalSec = 3;
+  static const int maxStallSec = 10;       // 软刷新阈值
+  static const int softRefreshStallSec = 3; // playing 但 position 不更新的软刷新阈值
 
   // ==================== 生命周期 ====================
 
@@ -168,14 +174,17 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     return _channelMemory.putIfAbsent(key, () => _ChannelConfig());
   }
 
-  // ==================== mpv 底层优化配置（含音频修复） ====================
+  // ==================== mpv 底层优化配置（TS 专用） ====================
 
   Future<void> _applyMpvOptimizations(Player player, _ChannelConfig config) async {
     if (player.platform is! NativePlayer) return;
     final native = player.platform as NativePlayer;
 
     try {
-      // 换台加速
+      // ===== TS 流格式强制指定 =====
+      await native.setProperty('demuxer-lavf-format', 'mpegts');
+
+      // 换台加速（保守值，TS 流需要足够探测时间）
       await native.setProperty('demuxer-lavf-analyzeduration', '0.5');
       await native.setProperty('demuxer-lavf-probesize', '131072');
 
@@ -189,25 +198,28 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       await native.setProperty('vd-queue-enable', 'yes');
       await native.setProperty('vd-queue-max-bytes', '50M');
 
+      // 多线程解码（TS 流 H264 常用）
+      await native.setProperty('vd-lavc-threads', '4');
+      // 跳过非参考帧的环路滤波，降低 CPU 占用，减少卡顿
+      await native.setProperty('vd-lavc-skiploopfilter', 'nonref');
+
       // 音画同步
       await native.setProperty('video-sync', 'audio');
+      // 解码器丢帧保持实时性
       await native.setProperty('framedrop', 'decoder');
+      // 减少 GPU 缓冲
       await native.setProperty('opengl-glfinish', 'yes');
 
       // 硬件解码
       final hwdec = config.useHwdec ? 'auto-safe' : 'no';
       await native.setProperty('hwdec', hwdec);
 
+      // ===== 直播流禁用 seek（TS 流 seek 会导致画面卡住） =====
+      await native.setProperty('force-seekable', 'no');
+
       // ===== 音频修复参数 =====
-      // 强制立体声输出，避免多声道解码失败
       await native.setProperty('audio-channels', 'stereo');
-      // 音频采样格式自动
-      await native.setProperty('audio-format', 'auto');
-      // 音频采样率自动
-      await native.setProperty('audio-samplerate', '0');
-      // 禁用音频标准化（某些源会导致音量异常）
       await native.setProperty('volume-normalize', 'no');
-      // 音频缓冲
       await native.setProperty('audio-buffer', '0.2');
 
       // 网络超时与 mpv 内部重连
@@ -220,7 +232,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       // 直播流优化
       await native.setProperty('demuxer-hysteresis-secs', '5');
 
-      LogService.write('mpv 优化: hwdec=$hwdec, audio-channels=stereo');
+      LogService.write('mpv TS优化: hwdec=$hwdec, format=mpegts, seekable=no');
     } catch (e) {
       LogService.write('mpv 优化部分失败: $e');
     }
@@ -234,8 +246,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
     _cancelReconnect();
     _clearSubscriptions();
-    _audioTrackSelected = false;
-    _availableAudioTracks = [];
+    _resetTrackState();
 
     if (!isReconnect) {
       setState(() {
@@ -262,13 +273,10 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       await Future.delayed(const Duration(milliseconds: 150));
       await _applyMpvOptimizations(_player!, config);
       await _player!.setPlaylistMode(PlaylistMode.single);
-
-      // 【音频修复】设置音频设备为自动
       await _player!.setAudioDevice(AudioDevice.auto());
-      // 【音频修复】设置音量为 100（避免默认静音）
       await _player!.setVolume(100.0);
-      // 【音频修复】音频轨道设为自动
       await _player!.setAudioTrack(AudioTrack.auto());
+      await _player!.setVideoTrack(VideoTrack.auto());
 
       await _player!.open(Media(url), play: true)
           .timeout(const Duration(milliseconds: switchTimeoutMs));
@@ -304,8 +312,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _isReconnecting = false;
     _reconnectAttempt = 0;
     _hwdecErrorCount = 0;
-    _audioTrackSelected = false;
-    _availableAudioTracks = [];
+    _softRefreshing = false;
+    _resetTrackState();
 
     config.onSuccess();
 
@@ -334,8 +342,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _cancelAllTimers();
     _clearSubscriptions();
     _fadeOutVideo();
-    _audioTrackSelected = false;
-    _availableAudioTracks = [];
+    _resetTrackState();
 
     setState(() {
       _isLoading = true;
@@ -367,6 +374,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         await _player!.setAudioDevice(AudioDevice.auto());
         await _player!.setVolume(100.0);
         await _player!.setAudioTrack(AudioTrack.auto());
+        await _player!.setVideoTrack(VideoTrack.auto());
         await _player!.open(Media(newUrl), play: true)
             .timeout(const Duration(milliseconds: switchTimeoutMs));
 
@@ -430,7 +438,14 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }
   }
 
-  // ==================== Stream 监听器（含音频修复） ====================
+  void _resetTrackState() {
+    _audioTrackSelected = false;
+    _videoTrackSelected = false;
+    _availableAudioTracks = [];
+    _availableVideoTracks = [];
+  }
+
+  // ==================== Stream 监听器（TS 专用修复） ====================
 
   void _setupPlayerListeners() {
     _clearSubscriptions();
@@ -438,7 +453,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
     // 1. 错误流
     _subscriptions.add(_player!.stream.error.listen((error) {
-      if (error.isNotEmpty && !_isSwitching && !_isReconnecting) {
+      if (error.isNotEmpty && !_isSwitching && !_isReconnecting && !_softRefreshing) {
         LogService.write('Player error: $error');
 
         final lowerError = error.toLowerCase();
@@ -508,8 +523,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       _lastPositionUpdate = DateTime.now();
     }));
 
-    // ===== 【音频修复】9. 音频轨道监听 =====
+    // ===== 9. 音频轨道监听 =====
     _subscriptions.add(_player!.stream.tracks.listen((tracks) {
+      // 音频轨道
       final audios = tracks.audio;
       if (audios.isNotEmpty && audios != _availableAudioTracks) {
         _availableAudioTracks = audios;
@@ -517,10 +533,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         for (final t in audios) {
           LogService.write('  音轨: id=${t.id}, title=${t.title}, lang=${t.language}, codec=${t.codec}');
         }
-
-        // 如果还没有选择音轨，选择第一个非 "no" 的音轨
         if (!_audioTrackSelected && audios.length > 1) {
-          // 跳过第一个 "no" 选项，选第二个（即第一个真实音轨）
           final firstReal = audios.firstWhere(
             (t) => t.id != 'no',
             orElse: () => audios.first,
@@ -532,14 +545,36 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
           }
         }
       }
+
+      // 视频轨道（TS 流关键修复）
+      final videos = tracks.video;
+      if (videos.isNotEmpty && videos != _availableVideoTracks) {
+        _availableVideoTracks = videos;
+        LogService.write('检测到 ${videos.length} 个视频轨道');
+        for (final t in videos) {
+          LogService.write('  视频轨: id=${t.id}, title=${t.title}, codec=${t.codec}, wh=${t.width}x${t.height}');
+        }
+        if (!_videoTrackSelected && videos.length > 1) {
+          final firstReal = videos.firstWhere(
+            (t) => t.id != 'no',
+            orElse: () => videos.first,
+          );
+          if (firstReal.id != 'no') {
+            LogService.write('自动选择视频轨道: ${firstReal.title ?? firstReal.id}');
+            _player!.setVideoTrack(firstReal);
+            _videoTrackSelected = true;
+          }
+        }
+      }
     }));
 
-    // ===== 【音频修复】10. 当前音轨监听 =====
+    // ===== 10. 当前音轨监听 =====
     _subscriptions.add(_player!.stream.track.listen((track) {
       final audio = track.audio;
-      LogService.write('当前音轨: id=${audio.id}, title=${audio.title}');
+      final video = track.video;
+      LogService.write('当前轨道: 音频=${audio.id}, 视频=${video.id}');
+
       if (audio.id == 'no' || audio.id == 'auto') {
-        // 如果当前是 no/auto，且已经有可用音轨列表，尝试重新选择
         if (_availableAudioTracks.isNotEmpty) {
           final firstReal = _availableAudioTracks.firstWhere(
             (t) => t.id != 'no' && t.id != 'auto',
@@ -551,16 +586,37 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
           }
         }
       }
+
+      // TS 流关键修复：视频轨道是 no/auto 时重新选择
+      if (video.id == 'no' || video.id == 'auto') {
+        if (_availableVideoTracks.isNotEmpty) {
+          final firstReal = _availableVideoTracks.firstWhere(
+            (t) => t.id != 'no' && t.id != 'auto',
+            orElse: () => _availableVideoTracks.first,
+          );
+          if (firstReal.id != 'no') {
+            LogService.write('重新选择视频轨道: ${firstReal.title ?? firstReal.id}');
+            _player!.setVideoTrack(firstReal);
+          }
+        }
+      }
     }));
 
-    // ===== 【音频修复】11. 音频参数监听 =====
+    // ===== 11. 音频参数监听 =====
     _subscriptions.add(_player!.stream.audioParams.listen((params) {
       if (params != null) {
         LogService.write('音频参数: rate=${params.sampleRate}, channels=${params.channels}, format=${params.format}');
       }
     }));
 
-    // ===== 【音频修复】12. 音量监听 =====
+    // ===== 12. 视频参数监听（TS 流诊断） =====
+    _subscriptions.add(_player!.stream.videoParams.listen((params) {
+      if (params != null) {
+        LogService.write('视频参数: ${params.width}x${params.height}, fps=${params.frameRate}, codec=${params.codec}');
+      }
+    }));
+
+    // ===== 13. 音量监听 =====
     _subscriptions.add(_player!.stream.volume.listen((volume) {
       LogService.write('当前音量: $volume');
       if (volume < 1.0) {
@@ -570,7 +626,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }));
   }
 
-  // ==================== 心跳检测 ====================
+  // ==================== 心跳检测（含 TS 软刷新） ====================
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
@@ -581,18 +637,29 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _heartbeatTimer = Timer.periodic(
       const Duration(seconds: heartbeatIntervalSec),
       (_) {
-        if (_player == null || _isDisposed || _isSwitching || _isReconnecting) return;
+        if (_player == null || _isDisposed || _isSwitching || _isReconnecting || _softRefreshing) return;
 
         final now = DateTime.now();
         final positionStall = now.difference(_lastPositionUpdate);
         final bufferStall = now.difference(_lastBufferUpdate);
 
+        // 如果正在播放，完全信任，不判定断线
         if (_heartbeatPlaying) {
           _lastPositionUpdate = now;
           _lastBufferUpdate = now;
+
+          // 【TS 软刷新】playing=true 但 position 3 秒不更新 = 画面卡住
+          if (positionStall > const Duration(seconds: softRefreshStallSec) &&
+              bufferStall > const Duration(seconds: softRefreshStallSec)) {
+            LogService.write(
+              'TS软刷新: playing=true 但 position停${positionStall.inSeconds}s，执行软刷新',
+            );
+            _performSoftRefresh();
+          }
           return;
         }
 
+        // 不在播放中，且长时间停滞 = 真正断线
         if (positionStall > const Duration(seconds: maxStallSec) &&
             bufferStall > const Duration(seconds: maxStallSec)) {
           LogService.write(
@@ -602,6 +669,28 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         }
       },
     );
+  }
+
+  /// TS 软刷新：stop + open 同一 URL，不重建 Player，快速恢复画面
+  Future<void> _performSoftRefresh() async {
+    if (_isDisposed || _isSwitching || _isReconnecting || _softRefreshing) return;
+    _softRefreshing = true;
+
+    LogService.write('执行 TS 软刷新: $_currentUrl');
+    try {
+      await _player!.stop();
+      await Future.delayed(const Duration(milliseconds: 200));
+      await _player!.open(Media(_currentUrl), play: true)
+          .timeout(const Duration(milliseconds: switchTimeoutMs));
+      _lastPositionUpdate = DateTime.now();
+      _lastBufferUpdate = DateTime.now();
+      LogService.write('TS 软刷新成功');
+    } catch (e) {
+      LogService.write('TS 软刷新失败: $e');
+      _handleConnectionLost();
+    } finally {
+      _softRefreshing = false;
+    }
   }
 
   // ==================== 断线重连 ====================
@@ -620,8 +709,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _cancelAllTimers();
     _clearSubscriptions();
     _fadeOutVideo();
-    _audioTrackSelected = false;
-    _availableAudioTracks = [];
+    _resetTrackState();
 
     LogService.write('启动断线重连');
     _attemptReconnect(url);
@@ -671,6 +759,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         await _player!.setAudioDevice(AudioDevice.auto());
         await _player!.setVolume(100.0);
         await _player!.setAudioTrack(AudioTrack.auto());
+        await _player!.setVideoTrack(VideoTrack.auto());
         await _player!.open(Media(url), play: true)
             .timeout(const Duration(milliseconds: switchTimeoutMs));
 
