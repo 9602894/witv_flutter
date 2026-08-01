@@ -8,13 +8,10 @@ import '../services/log_service.dart';
 /// MediaKit 播放器组件（MPEG-TS 专用深度优化版）
 ///
 /// 针对 TS 流的核心优化：
-/// 1. **视频轨道自动选择**：和音频一样，监听 tracks.video，自动选择第一个有效视频轨道
-/// 2. **强制指定 mpegts 格式**：demuxer-lavf-format=mpegts，避免格式探测失败
-/// 3. **禁用 seek**：force-seekable=no，直播流 seek 会导致画面卡住
-/// 4. **关键帧策略**：vd-lavc-skiploopfilter=nonref 降低 CPU，vd-lavc-threads=4 多线程解码
-/// 5. **软刷新机制**：检测到 playing=true 但 position 3 秒不更新，自动 stop+open 刷新
-/// 6. **换台超时放宽**：TS 流分析慢，超时从 4s 改为 5s，给 demuxer 足够时间
-/// 7. **单 Player 复用**：VideoController 终身绑定，换台不重建
+/// 1. 视频/音频轨道自动选择
+/// 2. 强制 mpegts 格式，禁用 seek
+/// 3. 多线程解码，软刷新机制
+/// 4. 单 Player 终身复用
 class MediaKitPlayerWidget extends StatefulWidget {
   final String url;
   final VoidCallback onError;
@@ -55,40 +52,33 @@ class _ChannelConfig {
 }
 
 class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
-  // 核心：单 Player 终身复用
   Player? _player;
   VideoController? _videoController;
 
-  // UI 状态
   bool _isInitialized = false;
   bool _isLoading = true;
   bool _isFailed = false;
   bool _isDisposed = false;
   String _currentUrl = '';
 
-  // 换台控制
   bool _isSwitching = false;
   bool _switchCanceled = false;
 
-  // 画面过渡
   double _videoOpacity = 1.0;
 
-  // 重连控制
   bool _isReconnecting = false;
   int _reconnectAttempt = 0;
   Timer? _reconnectTimer;
 
-  // Stream 订阅
   final List<StreamSubscription> _subscriptions = [];
 
-  // 心跳检测 + 软刷新
   DateTime _lastPositionUpdate = DateTime.now();
   DateTime _lastBufferUpdate = DateTime.now();
   Timer? _heartbeatTimer;
   bool _heartbeatPlaying = false;
   bool _softRefreshing = false;
+  DateTime? _lastSoftRefreshTime;
 
-  // 网速监控
   double _speed = 0;
   final List<double> _speedHistory = [];
   Duration _lastBufferPosition = Duration.zero;
@@ -96,27 +86,23 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   double? _lastAudioBitrate;
   Timer? _speedTimer;
 
-  // 频道解码记忆
   static final Map<String, _ChannelConfig> _channelMemory = {};
 
-  // 硬件解码闪烁检测
   int _hwdecErrorCount = 0;
   static const int _hwdecErrorThreshold = 3;
 
-  // 音视频轨道修复
   List<AudioTrack> _availableAudioTracks = [];
   List<VideoTrack> _availableVideoTracks = [];
   bool _audioTrackSelected = false;
   bool _videoTrackSelected = false;
 
-  // ========== 常量配置 ==========
-  static const int switchTimeoutMs = 5000; // TS 流分析慢，放宽到 5s
+  static const int switchTimeoutMs = 5000;
   static const int maxSwitchAttempts = 3;
   static const int reconnectBaseDelayMs = 3000;
   static const int maxReconnectAttempts = 10;
   static const int heartbeatIntervalSec = 3;
-  static const int maxStallSec = 10;       // 软刷新阈值
-  static const int softRefreshStallSec = 3; // playing 但 position 不更新的软刷新阈值
+  static const int maxStallSec = 10;
+  static const int softRefreshStallSec = 3;
 
   // ==================== 生命周期 ====================
 
@@ -147,8 +133,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }
   }
 
-  // ==================== MediaKit 初始化 ====================
-
   Future<void> _ensureMediaKitInitialized() async {
     try {
       final test = Player();
@@ -167,69 +151,49 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }
   }
 
-  // ==================== 获取/创建频道配置 ====================
-
   _ChannelConfig _getChannelConfig(String url) {
     final key = _extractChannelName(url);
     return _channelMemory.putIfAbsent(key, () => _ChannelConfig());
   }
-
-  // ==================== mpv 底层优化配置（TS 专用） ====================
 
   Future<void> _applyMpvOptimizations(Player player, _ChannelConfig config) async {
     if (player.platform is! NativePlayer) return;
     final native = player.platform as NativePlayer;
 
     try {
-      // ===== TS 流格式强制指定 =====
       await native.setProperty('demuxer-lavf-format', 'mpegts');
-
-      // 换台加速（保守值，TS 流需要足够探测时间）
       await native.setProperty('demuxer-lavf-analyzeduration', '0.5');
       await native.setProperty('demuxer-lavf-probesize', '131072');
 
-      // 大缓存
       await native.setProperty('cache', 'yes');
       await native.setProperty('demuxer-max-bytes', '64M');
       await native.setProperty('demuxer-max-back-bytes', '32M');
       await native.setProperty('demuxer-readahead-secs', '10');
 
-      // 解码队列
       await native.setProperty('vd-queue-enable', 'yes');
       await native.setProperty('vd-queue-max-bytes', '50M');
-
-      // 多线程解码（TS 流 H264 常用）
       await native.setProperty('vd-lavc-threads', '4');
-      // 跳过非参考帧的环路滤波，降低 CPU 占用，减少卡顿
       await native.setProperty('vd-lavc-skiploopfilter', 'nonref');
 
-      // 音画同步
       await native.setProperty('video-sync', 'audio');
-      // 解码器丢帧保持实时性
       await native.setProperty('framedrop', 'decoder');
-      // 减少 GPU 缓冲
       await native.setProperty('opengl-glfinish', 'yes');
 
-      // 硬件解码
       final hwdec = config.useHwdec ? 'auto-safe' : 'no';
       await native.setProperty('hwdec', hwdec);
 
-      // ===== 直播流禁用 seek（TS 流 seek 会导致画面卡住） =====
       await native.setProperty('force-seekable', 'no');
 
-      // ===== 音频修复参数 =====
       await native.setProperty('audio-channels', 'stereo');
       await native.setProperty('volume-normalize', 'no');
       await native.setProperty('audio-buffer', '0.2');
 
-      // 网络超时与 mpv 内部重连
       await native.setProperty('network-timeout', '10');
       await native.setProperty('reconnect', 'yes');
       await native.setProperty('reconnect-stream-error', 'yes');
       await native.setProperty('reconnect-on-network-error', 'yes');
       await native.setProperty('reconnect-delay-max', '5');
 
-      // 直播流优化
       await native.setProperty('demuxer-hysteresis-secs', '5');
 
       LogService.write('mpv TS优化: hwdec=$hwdec, format=mpegts, seekable=no');
@@ -237,8 +201,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       LogService.write('mpv 优化部分失败: $e');
     }
   }
-
-  // ==================== 核心：初始化 / 重连 ====================
 
   Future<void> _initPlayer(String url, {bool isReconnect = false}) async {
     if (_isDisposed) return;
@@ -259,7 +221,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     LogService.write('${isReconnect ? "重连" : "加载"}频道: ${_extractChannelName(url)}');
 
     try {
-      // 单 Player 终身复用
       if (_player == null) {
         _player = Player(
           configuration: const PlayerConfiguration(
@@ -272,7 +233,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       await _player!.stop();
       await Future.delayed(const Duration(milliseconds: 150));
       await _applyMpvOptimizations(_player!, config);
-      await _player!.setPlaylistMode(PlaylistMode.single);
+      // 移除 PlaylistMode.single，直播流不设限制
       await _player!.setAudioDevice(AudioDevice.auto());
       await _player!.setVolume(100.0);
       await _player!.setAudioTrack(AudioTrack.auto());
@@ -326,8 +287,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     LogService.write('${isReconnect ? "重连" : "加载"}成功: $url');
   }
 
-  // ==================== 核心：换台 ====================
-
   Future<void> _switchToNewUrl(String newUrl) async {
     if (_isDisposed) return;
 
@@ -370,7 +329,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         await _player!.stop();
         await Future.delayed(const Duration(milliseconds: 150));
         await _applyMpvOptimizations(_player!, config);
-        await _player!.setPlaylistMode(PlaylistMode.single);
         await _player!.setAudioDevice(AudioDevice.auto());
         await _player!.setVolume(100.0);
         await _player!.setAudioTrack(AudioTrack.auto());
@@ -424,8 +382,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _isSwitching = false;
   }
 
-  // ==================== 画面过渡 ====================
-
   void _fadeOutVideo() {
     if (mounted && _videoOpacity > 0) {
       setState(() => _videoOpacity = 0.0);
@@ -445,13 +401,10 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _availableVideoTracks = [];
   }
 
-  // ==================== Stream 监听器（TS 专用修复） ====================
-
   void _setupPlayerListeners() {
     _clearSubscriptions();
     if (_player == null) return;
 
-    // 1. 错误流
     _subscriptions.add(_player!.stream.error.listen((error) {
       if (error.isNotEmpty && !_isSwitching && !_isReconnecting && !_softRefreshing) {
         LogService.write('Player error: $error');
@@ -476,7 +429,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // 2. 播放状态
     _subscriptions.add(_player!.stream.playing.listen((playing) {
       _heartbeatPlaying = playing;
       if (playing) {
@@ -486,46 +438,39 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // 3. 位置变化
     _subscriptions.add(_player!.stream.position.listen((_) {
       _lastPositionUpdate = DateTime.now();
     }));
 
-    // 4. 缓冲状态
     _subscriptions.add(_player!.stream.buffering.listen((buffering) {
       if (!buffering) {
         _lastBufferUpdate = DateTime.now();
       }
     }));
 
-    // 5. 缓冲位置
     _subscriptions.add(_player!.stream.buffer.listen((buffer) {
       _lastBufferUpdate = DateTime.now();
       _updateSpeedFromBuffer(buffer);
     }));
 
-    // 6. 音频比特率
     _subscriptions.add(_player!.stream.audioBitrate.listen((bitrate) {
       if (bitrate != null && bitrate > 0) {
         _lastAudioBitrate = bitrate;
       }
     }));
 
-    // 7. completed 流
     _subscriptions.add(_player!.stream.completed.listen((completed) {
       if (completed) {
-        LogService.write('completed=true（PlaylistMode.single 已自动循环）');
+        LogService.write('completed=true（直播流可能循环）');
       }
     }));
 
-    // 8. 日志流
     _subscriptions.add(_player!.stream.log.listen((_) {
       _lastPositionUpdate = DateTime.now();
     }));
 
-    // ===== 9. 音频轨道监听 =====
+    // 音频轨道
     _subscriptions.add(_player!.stream.tracks.listen((tracks) {
-      // 音频轨道
       final audios = tracks.audio;
       if (audios.isNotEmpty && audios != _availableAudioTracks) {
         _availableAudioTracks = audios;
@@ -552,7 +497,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         _availableVideoTracks = videos;
         LogService.write('检测到 ${videos.length} 个视频轨道');
         for (final t in videos) {
-          LogService.write('  视频轨: id=${t.id}, title=${t.title}, codec=${t.codec}, wh=${t.width}x${t.height}');
+          // VideoTrack 在 media_kit 1.2.6 中没有 width/height，只打印可用字段
+          LogService.write('  视频轨: id=${t.id}, title=${t.title}, codec=${t.codec}');
         }
         if (!_videoTrackSelected && videos.length > 1) {
           final firstReal = videos.firstWhere(
@@ -568,7 +514,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // ===== 10. 当前音轨监听 =====
     _subscriptions.add(_player!.stream.track.listen((track) {
       final audio = track.audio;
       final video = track.video;
@@ -587,7 +532,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         }
       }
 
-      // TS 流关键修复：视频轨道是 no/auto 时重新选择
       if (video.id == 'no' || video.id == 'auto') {
         if (_availableVideoTracks.isNotEmpty) {
           final firstReal = _availableVideoTracks.firstWhere(
@@ -602,21 +546,20 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
 
-    // ===== 11. 音频参数监听 =====
     _subscriptions.add(_player!.stream.audioParams.listen((params) {
       if (params != null) {
         LogService.write('音频参数: rate=${params.sampleRate}, channels=${params.channels}, format=${params.format}');
       }
     }));
 
-    // ===== 12. 视频参数监听（TS 流诊断） =====
+    // 视频参数（修复：media_kit 1.2.6 的 VideoParams 只有 codec, sampleRate 等，没有宽高帧率）
     _subscriptions.add(_player!.stream.videoParams.listen((params) {
       if (params != null) {
-        LogService.write('视频参数: ${params.width}x${params.height}, fps=${params.frameRate}, codec=${params.codec}');
+        // 只打印存在的字段，避免编译错误
+        LogService.write('视频参数: $params');
       }
     }));
 
-    // ===== 13. 音量监听 =====
     _subscriptions.add(_player!.stream.volume.listen((volume) {
       LogService.write('当前音量: $volume');
       if (volume < 1.0) {
@@ -625,8 +568,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       }
     }));
   }
-
-  // ==================== 心跳检测（含 TS 软刷新） ====================
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
@@ -643,12 +584,10 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         final positionStall = now.difference(_lastPositionUpdate);
         final bufferStall = now.difference(_lastBufferUpdate);
 
-        // 如果正在播放，完全信任，不判定断线
         if (_heartbeatPlaying) {
           _lastPositionUpdate = now;
           _lastBufferUpdate = now;
 
-          // 【TS 软刷新】playing=true 但 position 3 秒不更新 = 画面卡住
           if (positionStall > const Duration(seconds: softRefreshStallSec) &&
               bufferStall > const Duration(seconds: softRefreshStallSec)) {
             LogService.write(
@@ -659,7 +598,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
           return;
         }
 
-        // 不在播放中，且长时间停滞 = 真正断线
         if (positionStall > const Duration(seconds: maxStallSec) &&
             bufferStall > const Duration(seconds: maxStallSec)) {
           LogService.write(
@@ -671,10 +609,14 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     );
   }
 
-  /// TS 软刷新：stop + open 同一 URL，不重建 Player，快速恢复画面
   Future<void> _performSoftRefresh() async {
     if (_isDisposed || _isSwitching || _isReconnecting || _softRefreshing) return;
+    if (_lastSoftRefreshTime != null && DateTime.now().difference(_lastSoftRefreshTime!).inSeconds < 10) {
+      LogService.write('软刷新冷却中，跳过');
+      return;
+    }
     _softRefreshing = true;
+    _lastSoftRefreshTime = DateTime.now();
 
     LogService.write('执行 TS 软刷新: $_currentUrl');
     try {
@@ -692,8 +634,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       _softRefreshing = false;
     }
   }
-
-  // ==================== 断线重连 ====================
 
   void _handleConnectionLost() {
     if (_isDisposed || _isSwitching || _isReconnecting) return;
@@ -755,7 +695,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         await _player!.stop();
         await Future.delayed(const Duration(milliseconds: 150));
         await _applyMpvOptimizations(_player!, config);
-        await _player!.setPlaylistMode(PlaylistMode.single);
         await _player!.setAudioDevice(AudioDevice.auto());
         await _player!.setVolume(100.0);
         await _player!.setAudioTrack(AudioTrack.auto());
@@ -782,8 +721,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
   }
-
-  // ==================== 网速监控 ====================
 
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
@@ -853,8 +790,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     widget.onSpeedUpdate(_speed);
   }
 
-  // ==================== 工具方法 ====================
-
   void _clearSubscriptions() {
     for (final sub in _subscriptions) {
       sub.cancel();
@@ -886,8 +821,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _cancelReconnect();
     _initPlayer(_currentUrl);
   }
-
-  // ==================== 构建 UI ====================
 
   @override
   Widget build(BuildContext context) {
