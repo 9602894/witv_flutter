@@ -35,6 +35,19 @@ class _ScheduleViewState extends State<ScheduleView> {
   int selectedDayIndex = 0;
   List<String> dayLabels = [];
 
+  // 工具：直接使用当前时间（设备时区即为北京时间）
+  DateTime _getNow() => DateTime.now();
+
+  // 格式化时间 HH:mm
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  // 获取日期字符串 yyyy-MM-dd
+  String _getDate(DateTime time) {
+    return '${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')}';
+  }
+
   @override
   void didUpdateWidget(ScheduleView oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -53,12 +66,11 @@ class _ScheduleViewState extends State<ScheduleView> {
     final programs = widget.selectedChannel != null ? widget.epgMap[widget.selectedChannel!.name] ?? [] : [];
     final days = <String>{};
     for (var prog in programs) {
-      final date = '${prog.start.year}-${prog.start.month.toString().padLeft(2, '0')}-${prog.start.day.toString().padLeft(2, '0')}';
-      days.add(date);
+      days.add(_getDate(prog.start)); // 按日期分组
     }
     final sorted = days.toList()..sort();
-    final now = DateTime.now();
-    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final now = _getNow();
+    final todayStr = _getDate(now);
     final filtered = <String>[];
     bool found = false;
     for (var d in sorted) {
@@ -78,8 +90,7 @@ class _ScheduleViewState extends State<ScheduleView> {
     List<EpgProgram> dayPrograms = [];
     if (selectedDayIndex < dayLabels.length) {
       final targetDay = dayLabels[selectedDayIndex];
-      dayPrograms = programs.where((p) =>
-          '${p.start.year}-${p.start.month.toString().padLeft(2, '0')}-${p.start.day.toString().padLeft(2, '0')}' == targetDay).cast<EpgProgram>().toList();
+      dayPrograms = programs.where((p) => _getDate(p.start) == targetDay).toList();
     }
 
     if (widget.showLeft) {
@@ -139,9 +150,9 @@ class _ScheduleViewState extends State<ScheduleView> {
             itemCount: dayPrograms.length,
             itemBuilder: (context, index) {
               final prog = dayPrograms[index];
-              final now = DateTime.now();
+              final now = _getNow();
               final isCurrent = prog.start.isBefore(now) && prog.end.isAfter(now);
-              final timeStr = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')}';
+              final timeStr = '${_formatTime(prog.start)}-${_formatTime(prog.end)}';
               return Container(
                 color: isCurrent ? Colors.blue.withOpacity(0.4) : Colors.transparent,
                 child: ListTile(
@@ -191,8 +202,8 @@ class _ScheduleViewState extends State<ScheduleView> {
     final month = int.parse(parts[1]);
     final day = int.parse(parts[2]);
     final date = DateTime(int.parse(parts[0]), month, day);
-    final now = DateTime.now();
-    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final now = _getNow();
+    final todayStr = _getDate(now);
     if (dateStr == todayStr) return '今天 $month/$day';
     final weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     return '${weekdays[date.weekday % 7]} $month/$day';
