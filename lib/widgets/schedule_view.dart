@@ -35,15 +35,12 @@ class _ScheduleViewState extends State<ScheduleView> {
   int selectedDayIndex = 0;
   List<String> dayLabels = [];
 
-  // 工具：直接使用当前时间（设备时区即为北京时间）
   DateTime _getNow() => DateTime.now();
 
-  // 格式化时间 HH:mm
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
-  // 获取日期字符串 yyyy-MM-dd
   String _getDate(DateTime time) {
     return '${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')}';
   }
@@ -63,7 +60,6 @@ class _ScheduleViewState extends State<ScheduleView> {
   }
 
   void _updateDays() {
-    // 明确指定 List<EpgProgram> 类型
     final List<EpgProgram> programs = widget.selectedChannel != null
         ? (widget.epgMap[widget.selectedChannel!.name] ?? <EpgProgram>[])
         : <EpgProgram>[];
@@ -89,14 +85,12 @@ class _ScheduleViewState extends State<ScheduleView> {
 
   @override
   Widget build(BuildContext context) {
-    // 明确指定 List<EpgProgram> 类型
     final List<EpgProgram> programs = widget.selectedChannel != null
         ? (widget.epgMap[widget.selectedChannel!.name] ?? <EpgProgram>[])
         : <EpgProgram>[];
     List<EpgProgram> dayPrograms = [];
     if (selectedDayIndex < dayLabels.length) {
       final targetDay = dayLabels[selectedDayIndex];
-      // 这里 toList() 返回 List<EpgProgram> 因为 programs 已经是该类型
       dayPrograms = programs.where((p) => _getDate(p.start) == targetDay).toList();
     }
 
