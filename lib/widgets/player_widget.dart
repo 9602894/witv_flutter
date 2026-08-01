@@ -26,17 +26,17 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   bool _isFailed = false;
   bool _isDisposed = false;
   String _currentUrl = '';
+  
   Timer? _speedTimer;
   Timer? _reconnectTimer;
-  Timer? _stallTimer; // 检测播放停滞
-  int _reconnectAttempts = 0;
-  static const int initTimeoutMs = 3000; // 缩短超时
+  Timer? _stallMonitorTimer; // 监测播放卡住
+  int _reconnectAttempts = 0; // 仅用于记录，不限次数
+  static const int initTimeoutMs = 3000; // 3秒超时
   double _speed = 0;
   bool _isPlaying = false;
   bool _isBuffering = false;
-  bool _isReconnecting = false; // 防止重复重连
 
-  // 预加载控制器（用于切换）
+  // 预加载控制器（用于平滑切换）
   VideoPlayerController? _preloadController;
   String? _preloadUrl;
 
@@ -55,60 +55,56 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     }
   }
 
-  // 切换时提前预加载新流
+  // -------- 切换新流（预加载） --------
   Future<void> _switchToNewUrl(String newUrl) async {
     if (_isDisposed) return;
     LogService.write('切换频道: ${_extractChannelName(newUrl)}');
 
-    // 立即显示加载状态
+    // 立即显示加载状态，保持旧播放器显示（如果存在）
     setState(() {
       _isLoading = true;
       _isFailed = false;
-      _isReconnecting = false;
     });
 
-    // 取消所有重连和监视器
-    _cancelAllTimers();
+    // 取消旧的重连定时器（避免干扰）
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
 
-    // 如果当前控制器存在，不立即释放，保留显示，同时后台预加载新流
     try {
-      // 创建新控制器
+      // 1. 在后台创建新控制器
       final newController = _createController(newUrl);
-      // 添加监听，但先不播放
       await newController.initialize().timeout(Duration(milliseconds: initTimeoutMs));
       if (_isDisposed) return;
 
-      // 停止旧控制器播放，释放旧控制器资源
-      await _controller?.pause();
+      // 2. 强制释放旧控制器（立即释放资源）
       await _controller?.dispose();
       _controller = null;
-      _isInitialized = false;
 
-      // 使用新控制器
+      // 3. 切换为新控制器
       _controller = newController;
       _currentUrl = newUrl;
       _isInitialized = true;
       _isLoading = false;
       _isFailed = false;
       _reconnectAttempts = 0;
-      _controller!.addListener(_onPlayerStateChanged);
+
+      // 4. 开始播放
       _controller!.play();
       _startSpeedMonitor();
       _startStallMonitor();
       setState(() {});
       LogService.write('切换成功: $newUrl');
     } catch (e) {
-      // 预加载失败，回退到旧流（如果有且可用）
-      LogService.write('预加载新流失败: $e');
+      // 预加载失败，释放新控制器资源
+      await _preloadController?.dispose();
+      _preloadController = null;
+
+      // 如果旧控制器还活着，继续播放旧流
       if (_controller != null && _controller!.value.isInitialized) {
-        // 继续播放旧流
         setState(() => _isLoading = false);
-        // 尝试重新播放旧流
-        if (!_controller!.value.isPlaying) {
-          _controller!.play();
-        }
+        LogService.write('预加载新流失败，回退到旧流');
       } else {
-        // 旧流也不可用，显示错误并重连
+        // 否则触发重连
         setState(() {
           _isLoading = false;
           _isFailed = true;
@@ -119,6 +115,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     }
   }
 
+  // -------- 创建控制器 --------
   VideoPlayerController _createController(String url) {
     return VideoPlayerController.network(
       url,
@@ -136,15 +133,22 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     );
   }
 
+  // -------- 初始化播放器（首次或重连） --------
   Future<void> _initPlayer() async {
     if (_isDisposed) return;
-    // 释放旧资源
-    await _forceDisposeController();
+
+    // 强制释放旧资源
+    await _controller?.dispose();
+    _controller = null;
     _isInitialized = false;
     _isLoading = true;
     _isFailed = false;
     _isPlaying = false;
-    _isReconnecting = false;
+    _reconnectAttempts = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _stallMonitorTimer?.cancel();
+    _stallMonitorTimer = null;
     setState(() {});
 
     LogService.write('加载频道: ${_extractChannelName(_currentUrl)}');
@@ -157,15 +161,18 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       setState(() {
         _isInitialized = true;
         _isLoading = false;
+        _isFailed = false;
       });
       _controller!.play();
       _startSpeedMonitor();
       _startStallMonitor();
-      _reconnectAttempts = 0;
       LogService.write('加载成功: $_currentUrl');
     } catch (e) {
       if (_isDisposed) return;
       LogService.write('加载失败: $e');
+      // 释放当前控制器（可能部分初始化）
+      await _controller?.dispose();
+      _controller = null;
       setState(() {
         _isLoading = false;
         _isFailed = true;
@@ -175,99 +182,71 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     }
   }
 
+  // -------- 状态监听（检测缓冲、卡死） --------
   void _onPlayerStateChanged() {
     if (_controller == null || !_controller!.value.isInitialized) return;
     final value = _controller!.value;
     _isPlaying = value.isPlaying;
     _isBuffering = value.isBuffering;
 
-    // 检测播放停滞（针对直播流，无 duration 时，若播放且缓冲结束但无数据，则判断）
-    // 对于直播流，position 可能无限增长，我们检测速度或缓冲状态。
-    // 简单方案：若 isPlaying==false 且 isBuffering==false，且速度持续为0，则触发重连
-    // 这里由 stallTimer 周期性检测更稳健。
-  }
-
-  void _startStallMonitor() {
-    _stallTimer?.cancel();
-    _stallTimer = Timer.periodic(Duration(seconds: 5), (timer) {
-      if (_isDisposed || _isReconnecting) return;
-      if (_controller == null || !_controller!.value.isInitialized) return;
-      final value = _controller!.value;
-      // 如果正在播放，但速度 < 0.1KB/s 持续超过10秒，认为停滞
-      if (_speed < 0.1 && value.isPlaying) {
-        // 检查是否已经超过10秒无速度
-        if (_speed == 0.0) {
-          // 可能是网络问题，触发重连
-          LogService.write('检测到播放停滞（速度0），尝试重连');
-          _scheduleReconnect();
-        }
-      }
-    });
-  }
-
-  void _cancelAllTimers() {
-    _speedTimer?.cancel();
-    _reconnectTimer?.cancel();
-    _stallTimer?.cancel();
-    _speedTimer = null;
-    _reconnectTimer = null;
-    _stallTimer = null;
-  }
-
-  // 强制释放控制器资源
-  Future<void> _forceDisposeController() async {
-    if (_controller != null) {
-      try {
-        await _controller!.pause();
-        _controller!.removeListener(_onPlayerStateChanged);
-        await _controller!.dispose();
-      } catch (e) {
-        LogService.write('释放控制器异常: $e');
-      } finally {
-        _controller = null;
-        _isInitialized = false;
-        _isPlaying = false;
-      }
+    // 如果播放器不再播放且没有缓冲，且总时长大于0（说明不是结束），则可能是卡死
+    if (!value.isPlaying && !value.isBuffering && value.duration != null && value.duration!.inSeconds > 0) {
+      // 但如果是用户暂停则不处理（我们未提供暂停功能，因此可认为异常）
+      LogService.write('播放器异常停止，触发重连');
+      _scheduleReconnect();
     }
   }
 
-  void _scheduleReconnect() {
-    if (_isDisposed) return;
-    // 取消任何已有的重连
-    _reconnectTimer?.cancel();
-    _isReconnecting = true;
-
-    // 先强制释放当前控制器，避免资源占用
-    _forceDisposeController().then((_) {
-      if (_isDisposed) return;
-      // 计算延迟：递增重试间隔，最多5秒
-      int delay = (_reconnectAttempts * 1000).clamp(1000, 5000);
-      _reconnectTimer = Timer(Duration(milliseconds: delay), () {
-        if (_isDisposed) return;
-        _reconnectAttempts++;
-        _isReconnecting = false;
-        // 重新初始化
-        _initPlayer();
-      });
+  // -------- 定期检测播放是否卡住（额外保障） --------
+  void _startStallMonitor() {
+    _stallMonitorTimer?.cancel();
+    _stallMonitorTimer = Timer.periodic(Duration(seconds: 5), (timer) {
+      if (_controller == null || !_controller!.value.isInitialized) return;
+      final value = _controller!.value;
+      // 如果播放器处于加载中但不播放，且已加载完成（即卡在缓冲）
+      if (value.isBuffering && value.isPlaying == false && _isLoading == false) {
+        LogService.write('检测到卡在缓冲，强制重连');
+        _scheduleReconnect();
+      }
     });
   }
 
-  void _retry() {
-    // 用户手动重试，重置尝试计数
-    _reconnectAttempts = 0;
-    _isFailed = false;
-    _isReconnecting = false;
-    _cancelAllTimers();
-    _initPlayer();
+  // -------- 重连（无限制次数） --------
+  void _scheduleReconnect() {
+    if (_isDisposed) return;
+
+    // 取消旧的重连定时器
+    _reconnectTimer?.cancel();
+
+    // 强制释放当前控制器（关键：避免残留）
+    _controller?.removeListener(_onPlayerStateChanged);
+    _controller?.pause();
+    _controller?.dispose();
+    _controller = null;
+    _isInitialized = false;
+    _isPlaying = false;
+    setState(() {
+      _isLoading = true;  // 显示加载状态
+      _isFailed = false;
+    });
+
+    _reconnectAttempts++;
+    LogService.write('重连尝试 #$_reconnectAttempts');
+
+    // 延迟重连（指数退避，但最多延迟5秒）
+    int delayMs = 500 + (_reconnectAttempts * 200).clamp(0, 5000);
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (_isDisposed) return;
+      _initPlayer();
+    });
   }
 
+  // -------- 速度监控 --------
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
-    _speedTimer = Timer.periodic(Duration(seconds: 2), (timer) {
+    _speedTimer = Timer.periodic(Duration(seconds: 3), (timer) {
       if (_controller != null && _controller!.value.isInitialized) {
-        // 模拟速度，实际可计算网络流量（这里简化）
-        // 实际可用视频播放器提供的 networkUsage 等信息，但需要额外实现
-        // 这里保留原模拟方式，但更符合实际可计算缓存大小变化
+        // 模拟网速（可改为实际计算）
         double simulatedSpeed = 0.5 + (DateTime.now().millisecond % 10) / 2;
         setState(() => _speed = simulatedSpeed);
         widget.onSpeedUpdate(simulatedSpeed);
@@ -275,6 +254,7 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     });
   }
 
+  // -------- 辅助方法 --------
   String _extractChannelName(String url) {
     try {
       final uri = Uri.parse(url);
@@ -286,6 +266,12 @@ class _PlayerWidgetState extends State<PlayerWidget> {
     }
   }
 
+  void _retry() {
+    _reconnectAttempts = 0;
+    _initPlayer();
+  }
+
+  // -------- build --------
   @override
   Widget build(BuildContext context) {
     if (_isFailed) {
@@ -347,8 +333,12 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   @override
   void dispose() {
     _isDisposed = true;
-    _cancelAllTimers();
-    _forceDisposeController();
+    _reconnectTimer?.cancel();
+    _speedTimer?.cancel();
+    _stallMonitorTimer?.cancel();
+    _controller?.removeListener(_onPlayerStateChanged);
+    _controller?.dispose();
+    _controller = null;
     super.dispose();
   }
 }
