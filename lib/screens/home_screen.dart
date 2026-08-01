@@ -209,30 +209,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // 加载 EPG：将时间转换为本地时间（如果原来是UTC），然后排序
+  // 加载 EPG：直接使用原数据，不做任何时区转换，只排序
   // ============================================================
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
-      final converted = <String, List<EpgProgram>>{};
+      final sorted = <String, List<EpgProgram>>{};
       all.forEach((channel, programs) {
-        final list = programs.map((p) {
-          // 如果时间是 UTC，则转为本地时间（设备时区为北京，等同于+8）
-          // 如果已经是本地时间，toLocal() 不会改变值
-          return EpgProgram(
-            title: p.title,
-            start: p.start.toLocal(),
-            end: p.end.toLocal(),
-            desc: p.desc,
-          );
-        }).toList();
+        final list = List<EpgProgram>.from(programs);
         list.sort((a, b) => a.start.compareTo(b.start));
-        converted[channel] = list;
+        sorted[channel] = list;
       });
       setState(() {
-        epgMap = converted;
+        epgMap = sorted;
       });
-      LogService.write('全量 EPG 加载完成，频道数: ${converted.length}');
+      LogService.write('全量 EPG 加载完成，频道数: ${sorted.length}');
     } catch (e) {
       LogService.write('加载全量 EPG 失败: $e');
     }
@@ -241,14 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
-      final list = programs.map((p) {
-        return EpgProgram(
-          title: p.title,
-          start: p.start.toLocal(),
-          end: p.end.toLocal(),
-          desc: p.desc,
-        );
-      }).toList();
+      final list = List<EpgProgram>.from(programs);
       list.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
         epgMap[channel.name] = list;
