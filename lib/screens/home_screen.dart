@@ -208,21 +208,28 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // 加载 EPG：直接使用原始数据，不做任何时区转换，只排序
+  // 加载 EPG：直接使用解析后的时间（已为北京时间），不做转换
   // ============================================================
   Future<void> _loadAllEpg() async {
     try {
       final all = await EpgParser.getAllPrograms();
-      final sorted = <String, List<EpgProgram>>{};
+      final converted = <String, List<EpgProgram>>{};
       all.forEach((channel, programs) {
-        final list = List<EpgProgram>.from(programs);
+        final list = programs.map((p) {
+          return EpgProgram(
+            title: p.title,
+            start: p.start,   // 已经是本地时间
+            end: p.end,       // 已经是本地时间
+            desc: p.desc,
+          );
+        }).toList();
         list.sort((a, b) => a.start.compareTo(b.start));
-        sorted[channel] = list;
+        converted[channel] = list;
       });
       setState(() {
-        epgMap = sorted;
+        epgMap = converted;
       });
-      LogService.write('全量 EPG 加载完成，频道数: ${sorted.length}');
+      LogService.write('全量 EPG 加载完成，频道数: ${converted.length}');
     } catch (e) {
       LogService.write('加载全量 EPG 失败: $e');
     }
@@ -231,7 +238,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadEpgForChannel(Channel channel) async {
     try {
       final programs = await EpgParser.getProgramsForChannel(channel.name);
-      final list = List<EpgProgram>.from(programs);
+      final list = programs.map((p) {
+        return EpgProgram(
+          title: p.title,
+          start: p.start,
+          end: p.end,
+          desc: p.desc,
+        );
+      }).toList();
       list.sort((a, b) => a.start.compareTo(b.start));
       setState(() {
         epgMap[channel.name] = list;
