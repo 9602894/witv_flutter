@@ -24,8 +24,8 @@ if (flutterVersionName == null) {
 
 android {
     namespace 'com.whyun.witv'
-    compileSdk 36                        // 升级到 36
-    ndkVersion "28.2.13676358"           // 指定 NDK 版本
+    compileSdk 36
+    ndkVersion "28.2.13676358"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -43,7 +43,7 @@ android {
     defaultConfig {
         applicationId "com.whyun.witv"
         minSdk 21
-        targetSdk 36                     // 建议同步升级 targetSdk
+        targetSdk 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
 
@@ -52,9 +52,16 @@ android {
         }
     }
 
+    // 关键：防止打包时排除 native 库
+    packagingOptions {
+        pickFirst '**/*.so'
+    }
+
     buildTypes {
         release {
             signingConfig signingConfigs.debug
+            // 确保不压缩 native 库（可选）
+            // zipAlignEnabled true
         }
     }
 }
