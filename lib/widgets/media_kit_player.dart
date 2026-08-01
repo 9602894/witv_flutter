@@ -71,7 +71,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   static const int reconnectBaseDelayMs = 2000;
   static const int maxReconnectAttempts = 10;
   static const int heartbeatIntervalSec = 3;
-  static const int maxStallSec = 8;
+  static const int maxStallSec = 5; // 从 8 秒改为 5 秒，更灵敏
 
   // ==================== 生命周期 ====================
 
@@ -125,6 +125,8 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   // ==================== mpv 底层优化配置 ====================
 
   Future<void> _applyMpvOptimizations(Player player) async {
+    // 增加空值保护
+    if (player == null) return;
     if (player.platform is! NativePlayer) return;
     final native = player.platform as NativePlayer;
 
@@ -240,7 +242,11 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _isReconnecting = false;
     _reconnectAttempt = 0;
 
-    _videoController ??= VideoController(_player!);
+    // 如果已有 _videoController 与当前 _player 不匹配，则重新创建
+    // 但在正常情况下，直接复用即可
+    if (_videoController == null || _videoController!.player != _player) {
+      _videoController = VideoController(_player!);
+    }
 
     _setupPlayerListeners();
     _startHeartbeat();
@@ -299,7 +305,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
             _isInitialized = true;
             _isLoading = false;
             _isFailed = false;
-            _videoController ??= VideoController(_player!);
+            if (_videoController == null || _videoController!.player != _player) {
+              _videoController = VideoController(_player!);
+            }
             _setupPlayerListeners();
             _startHeartbeat();
             _startSpeedMonitor();
@@ -631,7 +639,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _clearSubscriptions();
     final oldPlayer = _player;
     _player = null;
-    _videoController = null;
+    _videoController = null;   // 显式置空，确保 UI 重建
     _isInitialized = false;
 
     if (oldPlayer != null) {
