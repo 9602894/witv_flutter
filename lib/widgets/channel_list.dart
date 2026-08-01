@@ -35,7 +35,7 @@ class ChannelList extends StatelessWidget {
       itemBuilder: (context, index) {
         final ch = channels[index];
         final isSelected = ch == selectedChannel;
-        final epgList = epgMap[ch.name] ?? [];
+        final epgList = epgMap[ch.name] ?? <EpgProgram>[];
         String? currentTitle;
         if (epgList.isNotEmpty) {
           final now = _getNow();
