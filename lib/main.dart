@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:media_kit/media_kit.dart';  // 添加导入
+import 'package:media_kit/media_kit.dart';
 import 'screens/home_screen.dart';
 import 'services/settings_service.dart';
 import 'services/log_service.dart';
@@ -9,11 +9,18 @@ import 'services/log_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.init();
+  
+  LogService.write('开始初始化 MediaKit');
+  try {
+    MediaKit.ensureInitialized();
+    LogService.write('MediaKit 初始化成功');
+  } catch (e, stack) {
+    LogService.writeCrashLog('MediaKit 初始化失败: $e', stack);
+    // 注意：如果初始化失败，可能无法使用 media_kit，但应用仍应继续运行（或退出）
+    // 这里简单记录错误，并继续运行，但播放器可能无法工作
+  }
 
-  // 初始化 media_kit（必须在任何 media_kit API 之前调用）
-  MediaKit.ensureInitialized();
-
-  // 强制横屏（锁定左右横屏）
+  // 强制横屏
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
