@@ -73,7 +73,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   /// 心跳检测间隔
   static const int heartbeatIntervalSec = 3;
   /// 超过此时间无 position/buffer 更新即判定断线（直播流用）
-  static const int maxStallSec = 8;
+  static const int maxStallSec = 5;  // 从 8 调整为 5，更灵敏
 
   // ==================== 生命周期 ====================
 
@@ -86,7 +86,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         _initPlayer(widget.url);
       }
     }).catchError((e) {
-      LogService.write('MediaKit 初始化最终失败: \$e');
+      LogService.write('MediaKit 初始化最终失败: $e');
       if (mounted) {
         setState(() {
           _isFailed = true;
@@ -100,7 +100,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   void didUpdateWidget(covariant MediaKitPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url && !_isDisposed) {
-      // 如果正在初始化中，直接走换台逻辑；_switchToNewUrl 会强制释放旧资源
       _switchToNewUrl(widget.url);
     }
   }
@@ -119,7 +118,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         LogService.write('MediaKit 二次初始化成功');
         await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
-        LogService.write('MediaKit 二次初始化失败: \$e');
+        LogService.write('MediaKit 二次初始化失败: $e');
         rethrow;
       }
     }
@@ -129,7 +128,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
   Future<void> _initPlayer(String url, {bool isReconnect = false}) async {
     if (_isDisposed) return;
-    // 如果正在换台，不重入（换台逻辑自己处理）
     if (_isSwitching && !isReconnect) return;
 
     _cancelReconnect();
@@ -142,7 +140,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       });
     }
 
-    LogService.write('\${isReconnect ? "重连" : "加载"}频道: \${_extractChannelName(url)}');
+    LogService.write('${isReconnect ? "重连" : "加载"}频道: ${_extractChannelName(url)}');
 
     try {
       // 【核心优化 1】优先复用现有 Player，直接 open()，省去 dispose/create 时间
@@ -153,7 +151,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
           _onPlayerReady(url, isReconnect: isReconnect);
           return;
         } catch (e) {
-          LogService.write('复用 Player 失败: \$e，回退到新建 Player');
+          LogService.write('复用 Player 失败: $e，回退到新建 Player');
           await _releasePlayer();
         }
       }
@@ -165,7 +163,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       _onPlayerReady(url, isReconnect: isReconnect);
 
     } catch (e) {
-      LogService.write('\${isReconnect ? "重连" : "加载"}失败: \$e');
+      LogService.write('${isReconnect ? "重连" : "加载"}失败: $e');
       if (_isDisposed) return;
 
       await _releasePlayer();
@@ -178,7 +176,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         widget.onError();
       }
 
-      // 首次加载失败才启动重连；重连失败由 _attemptReconnect 自己递归
       if (!isReconnect) {
         _startReconnect(url);
       }
@@ -195,7 +192,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _isReconnecting = false;
     _reconnectAttempt = 0;
 
-    // VideoController 复用：同一个 Player 不需要重新创建
     _videoController ??= VideoController(_player!);
 
     _setupPlayerListeners();
@@ -203,7 +199,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _startSpeedMonitor();
 
     if (mounted) setState(() {});
-    LogService.write('\${isReconnect ? "重连" : "加载"}成功: \$url');
+    LogService.write('${isReconnect ? "重连" : "加载"}成功: $url');
   }
 
   // ==================== 核心：换台（极速版） ====================
@@ -211,13 +207,11 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
   Future<void> _switchToNewUrl(String newUrl) async {
     if (_isDisposed) return;
 
-    // 1. 强制取消旧流程
     _switchCanceled = true;
     _isSwitching = false;
     await Future.delayed(const Duration(milliseconds: 100));
     if (_isDisposed) return;
 
-    // 2. 重置状态，强制释放旧资源（确保旧 Player 不会和新流程冲突）
     _switchCanceled = false;
     _isSwitching = true;
     _cancelReconnect();
@@ -229,12 +223,12 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       _isFailed = false;
     });
 
-    LogService.write('开始换台: \${_extractChannelName(newUrl)}');
+    LogService.write('开始换台: ${_extractChannelName(newUrl)}');
 
     int attempt = 0;
     while (!_isDisposed && !_switchCanceled && attempt < maxSwitchAttempts) {
       attempt++;
-      LogService.write('换台尝试 #\$attempt');
+      LogService.write('换台尝试 #$attempt');
 
       try {
         // 策略 A：复用 Player（最快，通常 <500ms）
@@ -254,17 +248,15 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
             _startHeartbeat();
             _startSpeedMonitor();
             setState(() {});
-            LogService.write('换台成功(复用): \$newUrl');
+            LogService.write('换台成功(复用): $newUrl');
             _isSwitching = false;
             return;
           } catch (e) {
-            LogService.write('换台复用失败 #\$attempt: \$e');
-            // 非最后一次尝试时，短暂等待再试
+            LogService.write('换台复用失败 #$attempt: $e');
             if (attempt < maxSwitchAttempts) {
-              await Future.delayed(const Duration(milliseconds: 200));
+              await Future.delayed(const Duration(milliseconds: 100)); // 从 200 缩短为 100ms
               continue;
             }
-            // 最后一次尝试失败，释放旧 Player，回退到策略 B
             await _releasePlayer();
           }
         }
@@ -289,15 +281,15 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         _startHeartbeat();
         _startSpeedMonitor();
         setState(() {});
-        LogService.write('换台成功(新建): \$newUrl');
+        LogService.write('换台成功(新建): $newUrl');
         _isSwitching = false;
         return;
 
       } catch (e) {
-        LogService.write('换台尝试 #\$attempt 失败: \$e');
+        LogService.write('换台尝试 #$attempt 失败: $e');
         if (_isDisposed || _switchCanceled) break;
         if (attempt < maxSwitchAttempts) {
-          await Future.delayed(const Duration(milliseconds: 200));
+          await Future.delayed(const Duration(milliseconds: 100));
         }
       }
     }
@@ -323,7 +315,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     // 1. 错误流 —— 即时触发重连（比轮询快得多）
     _subscriptions.add(_player!.stream.error.listen((error) {
       if (error.isNotEmpty && !_isSwitching && !_isReconnecting) {
-        LogService.write('Player error: \$error');
+        LogService.write('Player error: $error');
         _handleConnectionLost();
       }
     }));
@@ -368,7 +360,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     }));
   }
 
-  // ==================== 心跳检测（替代 5s 轮询） ====================
+  // ==================== 心跳检测 ====================
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
@@ -384,12 +376,11 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         final positionStall = now.difference(_lastPositionUpdate);
         final bufferStall = now.difference(_lastBufferUpdate);
 
-        // 直播流：position 和 buffer 都长时间不更新 = 断线
         if (positionStall > const Duration(seconds: maxStallSec) &&
             bufferStall > const Duration(seconds: maxStallSec)) {
           LogService.write(
-            '心跳检测: position停滞\${positionStall.inSeconds}s, '
-            'buffer停滞\${bufferStall.inSeconds}s，判定断线',
+            '心跳检测: position停滞${positionStall.inSeconds}s, '
+            'buffer停滞${bufferStall.inSeconds}s，判定断线',
           );
           _handleConnectionLost();
         }
@@ -422,7 +413,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
     _reconnectAttempt++;
     if (_reconnectAttempt > maxReconnectAttempts) {
-      LogService.write('重连次数达到上限 \$maxReconnectAttempts，放弃');
+      LogService.write('重连次数达到上限 $maxReconnectAttempts，放弃');
       _isReconnecting = false;
       if (mounted) {
         setState(() {
@@ -434,16 +425,14 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
       return;
     }
 
-    // 指数退避：2s, 4s, 8s, 10s(max)
     final delayMs = reconnectBaseDelayMs * (1 << (_reconnectAttempt - 1));
     final cappedDelayMs = delayMs > 10000 ? 10000 : delayMs;
 
-    LogService.write('重连 #\$_reconnectAttempt，\${cappedDelayMs}ms 后尝试');
+    LogService.write('重连 #$_reconnectAttempt，${cappedDelayMs}ms 后尝试');
 
     _reconnectTimer = Timer(Duration(milliseconds: cappedDelayMs), () async {
       if (_isDisposed || _isSwitching || !_isReconnecting) return;
 
-      // 彻底释放旧资源再重连
       await _releasePlayer();
 
       try {
@@ -459,7 +448,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
         _player = newPlayer;
         _onPlayerReady(url, isReconnect: true);
       } catch (e) {
-        LogService.write('重连 #\$_reconnectAttempt 失败: \$e');
+        LogService.write('重连 #$_reconnectAttempt 失败: $e');
         if (!_isDisposed && _isReconnecting) {
           _attemptReconnect(url);
         }
@@ -474,14 +463,13 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
     _reconnectTimer = null;
   }
 
-  // ==================== 网速监控（基于 buffer 变化估算） ====================
+  // ==================== 网速监控 ====================
 
   void _startSpeedMonitor() {
     _speedTimer?.cancel();
     _lastSpeedCheck = DateTime.now();
     _lastBufferPosition = Duration.zero;
 
-    // 每 2 秒刷新一次 UI 上的速度显示
     _speedTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) setState(() {});
     });
@@ -493,14 +481,12 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
     if (elapsedSec > 0.5) {
       final bufferDiffMs = bufferPosition.inMilliseconds - _lastBufferPosition.inMilliseconds;
-
-      // 估算逻辑：buffer 前进秒数 / 经过秒数 ≈ 缓冲倍速
-      // 假设直播码率约 4Mbps(0.5MB/s)，则 bufferSpeed * 0.5 ≈ 近似下载速度
       final bufferSpeed = bufferDiffMs > 0
           ? (bufferDiffMs / 1000.0) / elapsedSec
           : 0.0;
 
-      _speed = bufferSpeed * 0.5; // 粗略换算为 MB/s
+      // 修正估算系数，更贴近实际码率
+      _speed = bufferSpeed * 0.25;
       if (_speed < 0) _speed = 0;
 
       widget.onSpeedUpdate(_speed);
@@ -512,7 +498,6 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
   // ==================== 工具方法 ====================
 
-  /// 彻底释放 Player 及相关资源
   Future<void> _releasePlayer() async {
     _clearSubscriptions();
     final oldPlayer = _player;
@@ -522,10 +507,9 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
 
     if (oldPlayer != null) {
       try {
-        // 不调用 stop()，直接 dispose 更快；media_kit 内部会处理清理
         await oldPlayer.dispose();
       } catch (e) {
-        LogService.write('释放 Player 异常: \$e');
+        LogService.write('释放 Player 异常: $e');
       }
     }
   }
@@ -616,7 +600,7 @@ class _MediaKitPlayerWidgetState extends State<MediaKitPlayerWidget> {
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
-              '\${_speed.toStringAsFixed(1)} M/s',
+              '${_speed.toStringAsFixed(1)} M/s',
               style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
