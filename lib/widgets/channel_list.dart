@@ -20,6 +20,14 @@ class ChannelList extends StatelessWidget {
     this.showLogo = true,
   }) : super(key: key);
 
+  // 工具：直接使用当前时间（设备时区即为北京时间）
+  DateTime _getNow() => DateTime.now();
+
+  // 格式化时间
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
@@ -30,10 +38,10 @@ class ChannelList extends StatelessWidget {
         final epgList = epgMap[ch.name] ?? [];
         String? currentTitle;
         if (epgList.isNotEmpty) {
-          final now = DateTime.now(); // 设备本地时间（北京时间）
+          final now = _getNow();
           for (var prog in epgList) {
             if (prog.start.isBefore(now) && prog.end.isAfter(now)) {
-              currentTitle = '${prog.start.hour.toString().padLeft(2, '0')}:${prog.start.minute.toString().padLeft(2, '0')}-${prog.end.hour.toString().padLeft(2, '0')}:${prog.end.minute.toString().padLeft(2, '0')} ${prog.title}';
+              currentTitle = '${_formatTime(prog.start)}-${_formatTime(prog.end)} ${prog.title}';
               break;
             }
           }
