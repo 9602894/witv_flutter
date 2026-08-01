@@ -27,10 +27,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 删除以下步骤，因为项目已有 android 目录
-      # - name: Ensure Android project exists
-      #   run: flutter create --platforms=android .
-
       - name: Build Android APK (release)
         run: flutter build apk --release
 
