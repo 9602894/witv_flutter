@@ -20,10 +20,8 @@ class ChannelList extends StatelessWidget {
     this.showLogo = true,
   }) : super(key: key);
 
-  // 工具：直接使用当前时间（设备时区即为北京时间）
   DateTime _getNow() => DateTime.now();
 
-  // 格式化时间
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
