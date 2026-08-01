@@ -42,7 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
   double subWeight = 0.2;
   double groupWeight = 0.2;
   double channelWeight = 0.6;
-
   double scheduleGroupWeight = 0.25;
   double scheduleChannelWeight = 0.35;
   double scheduleWeight = 0.4;
@@ -65,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late File _layoutConfigFile;
 
   // ============================================================
-  // 工具函数：完全基于设备本地时间（北京时间），无任何偏移
+  // 工具函数：直接使用设备本地时间（北京时间），无任何偏移
   // ============================================================
   DateTime _getNow() => DateTime.now();
 
@@ -209,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // 加载 EPG：直接使用原数据，不做任何时区转换，只排序
+  // 加载 EPG：直接使用原始数据，不做任何时区转换，只排序
   // ============================================================
   Future<void> _loadAllEpg() async {
     try {
@@ -329,7 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // 构建 UI（与之前完全相同，无任何偏移）
+  // 构建 UI
   // ============================================================
   @override
   Widget build(BuildContext context) {
