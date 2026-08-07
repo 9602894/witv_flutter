@@ -1,0 +1,41 @@
+name: witv_flutter
+description: 跨平台直播播放器（类酷9）
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.1
+  path_provider: ^2.1.2
+  dio: ^5.4.0
+  xml: ^7.0.1
+  json_annotation: ^4.8.1
+  shared_preferences: ^2.2.2
+  file_picker: ^8.0.0
+  flutter_svg: ^2.0.9
+  crypto: ^3.0.0
+  http: ^1.2.0
+  image: ^4.9.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/configuration.json
+    - assets/epg_data.json
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "ico/ic_launcher.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "ico/ic_launcher.png"
