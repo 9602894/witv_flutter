@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
@@ -11,14 +12,97 @@ import '../models/epg_program.dart';
 import 'log_service.dart';
 import 'config_service.dart';
 
-// 顶层函数，供 compute 调用：解析节目（key = 频道显示名称）
-Map<String, List<EpgProgram>> _parseEpgXmlIsolate(String xmlContent) {
-  return EpgParser._parseEpgXml(xmlContent);
+// ---- 顶层函数（供 compute 调用） ----
+// 解析节目（接收 XML 文件路径）
+Map<String, List<EpgProgram>> _parseEpgXmlIsolate(String xmlPath) {
+  return EpgParser._parseEpgXml(xmlPath);
 }
 
-// 顶层函数，供 compute 调用：提取图标（key = 频道显示名称）
-Map<String, String> _extractIconsIsolate(String xmlContent) {
-  return EpgParser._extractIconsFromChannels(xmlContent);
+// 提取图标（接收 XML 文件路径）
+Map<String, String> _extractIconsIsolate(String xmlPath) {
+  return EpgParser._extractIconsFromChannels(xmlPath);
+}
+
+// ---- 新增：在 isolate 中执行下载更新（完全不影响主线程） ----
+Future<bool> _checkHashUpdateIsolate(Map<String, String> params) async {
+  final epgUrl = params['epgUrl']!;
+  final cacheDirPath = params['cacheDirPath']!;
+  final hashFileName = EpgParser.hashFileName;
+  final iconCacheFileName = EpgParser.iconCacheFileName;
+
+  try {
+    // 1. 获取远程哈希
+    final hashUrl = '$epgUrl.hash';
+    final response = await Dio().get(
+      hashUrl,
+      options: Options(
+        receiveTimeout: Duration(seconds: 10),
+        sendTimeout: Duration(seconds: 5),
+      ),
+    );
+    final remoteHash = response.data.toString().trim();
+    if (remoteHash.isEmpty) return false;
+
+    final hashFile = File('$cacheDirPath/$hashFileName');
+    String localHash = '';
+    if (await hashFile.exists()) {
+      localHash = await hashFile.readAsString();
+    }
+
+    if (localHash == remoteHash) {
+      // 哈希未变化，无需更新
+      return false;
+    }
+
+    // 2. 下载新 XML（流式下载到临时文件）
+    final tempFile = File(
+        '$cacheDirPath/epg_temp_${DateTime.now().millisecondsSinceEpoch}.xml');
+    await Dio().download(
+      epgUrl,
+      tempFile.path,
+      options: Options(
+        receiveTimeout: Duration(seconds: 60),
+        sendTimeout: Duration(seconds: 10),
+      ),
+    );
+
+    if (!await tempFile.exists()) return false;
+
+    final xmlContent = await tempFile.readAsString();
+    if (xmlContent.trim().isEmpty || !xmlContent.trim().startsWith('<')) {
+      await tempFile.delete();
+      return false;
+    }
+
+    // 3. 计算新哈希并保存
+    final newHash = md5.convert(utf8.encode(xmlContent)).toString();
+
+    // 4. 提取图标并缓存（在 isolate 中完成，不影响主线程）
+    final icons = EpgParser._extractIconsFromChannels(xmlContent);
+    if (icons.isNotEmpty) {
+      final iconFile = File('$cacheDirPath/$iconCacheFileName');
+      await iconFile.writeAsString(jsonEncode(icons));
+    }
+
+    // 5. 清理旧文件
+    if (await hashFile.exists()) {
+      final oldHash = await hashFile.readAsString();
+      final oldXml = File('$cacheDirPath/epg_$oldHash.xml');
+      if (await oldXml.exists()) await oldXml.delete();
+      await hashFile.delete();
+    }
+
+    // 6. 保存新 XML 和哈希
+    final newXmlFile = File('$cacheDirPath/epg_$newHash.xml');
+    await tempFile.copy(newXmlFile.path);
+    await tempFile.delete();
+    await hashFile.writeAsString(newHash);
+
+    return true;
+  } catch (e) {
+    // 下载失败，不影响已有缓存
+    return false;
+  }
 }
 
 class EpgParser {
@@ -33,7 +117,6 @@ class EpgParser {
   static Map<String, String>? _nameToEpgId;
   static bool _epgDataLoaded = false;
 
-  // 配置和 EPG 数据仓库（witv_flutter）
   static const String _baseConfigUrl =
       'https://raw.githubusercontent.com/tytestelle/witv_flutter/main/assets/';
 
@@ -110,7 +193,6 @@ class EpgParser {
         }
       }
 
-      // 解析 JSON
       final decoded = jsonDecode(content);
       List<dynamic> jsonList;
       if (decoded is List) {
@@ -186,7 +268,7 @@ class EpgParser {
     }
   }
 
-  /// 检查并更新 EPG（哈希对比+下载）
+  /// 检查并更新 EPG（哈希对比+下载）—— 下载在 isolate 中执行，不影响播放
   static Future<bool> checkForUpdate() async {
     await _initCache();
     final url = await _getEpgUrl();
@@ -198,81 +280,25 @@ class EpgParser {
   }
 
   static Future<bool> _checkHashUpdate(String epgUrl) async {
-    try {
-      final hashUrl = '$epgUrl.hash';
-      final response = await Dio().get(
-        hashUrl,
-        options: Options(
-          receiveTimeout: Duration(seconds: 10),
-          sendTimeout: Duration(seconds: 5),
-        ),
-      );
-      final remoteHash = response.data.toString().trim();
-      if (remoteHash.isEmpty) return false;
+    await _initCache();
+    final cacheDirPath = _cacheDir!.path;
 
-      final hashFile = File('${_cacheDir!.path}/$hashFileName');
-      String localHash = '';
-      if (await hashFile.exists()) {
-        localHash = await hashFile.readAsString();
-      }
+    // 在 isolate 中执行下载更新，完全不影响主线程
+    final result = await compute(
+      _checkHashUpdateIsolate,
+      {'epgUrl': epgUrl, 'cacheDirPath': cacheDirPath},
+    );
 
-      if (localHash == remoteHash) {
-        await LogService.write('EPG 哈希未变化，无需更新');
-        return false;
-      }
-
-      await LogService.write('EPG 需要更新，开始流式下载...');
-
-      final tempFile = File(
-          '${_cacheDir!.path}/epg_temp_${DateTime.now().millisecondsSinceEpoch}.xml');
-      await Dio().download(
-        epgUrl,
-        tempFile.path,
-        options: Options(
-          receiveTimeout: Duration(seconds: 60),
-          sendTimeout: Duration(seconds: 10),
-        ),
-      );
-
-      if (!await tempFile.exists()) {
-        await LogService.write('EPG 下载失败：临时文件不存在');
-        return false;
-      }
-
-      final xmlContent = await tempFile.readAsString();
-      if (xmlContent.trim().isEmpty || !xmlContent.trim().startsWith('<')) {
-        await tempFile.delete();
-        await LogService.write('EPG 下载内容无效');
-        return false;
-      }
-
-      final newHash = _computeHash(xmlContent);
-      final icons = await compute(_extractIconsIsolate, xmlContent);
-      await _saveIconCache(icons);
-
-      if (await hashFile.exists()) {
-        final oldHash = await hashFile.readAsString();
-        final oldXml = File('${_cacheDir!.path}/epg_$oldHash.xml');
-        if (await oldXml.exists()) await oldXml.delete();
-        await hashFile.delete();
-      }
-
-      final newXmlFile = File('${_cacheDir!.path}/epg_$newHash.xml');
-      await tempFile.copy(newXmlFile.path);
-      await tempFile.delete();
-      await hashFile.writeAsString(newHash);
-
+    if (result) {
+      // 下载成功，清除旧缓存，下次加载时会重新读取
       _programsCache = null;
       _iconMapCache = null;
-
-      await LogService.write('EPG 更新完成，新哈希: $newHash');
-      return true;
-    } catch (e) {
-      await LogService.write('EPG 更新检查失败: $e');
-      return false;
+      await LogService.write('EPG 更新完成（在 isolate 中完成）');
     }
+    return result;
   }
 
+  // ---- 以下为解析相关方法（完全不变） ----
   static Map<String, String> _extractIconsFromChannels(String xmlContent) {
     try {
       final document = XmlDocument.parse(xmlContent);
@@ -295,55 +321,60 @@ class EpgParser {
     }
   }
 
-  static Map<String, List<EpgProgram>> _parseEpgXml(String xmlContent) {
-    final document = XmlDocument.parse(xmlContent);
-    final programs = <String, List<EpgProgram>>{};
+  static Map<String, List<EpgProgram>> _parseEpgXml(String xmlPath) {
+    try {
+      final xmlContent = File(xmlPath).readAsStringSync();
+      final document = XmlDocument.parse(xmlContent);
+      final programs = <String, List<EpgProgram>>{};
 
-    final idToName = <String, String>{};
-    for (var channel in document.findAllElements('channel')) {
-      final id = channel.getAttribute('id');
-      if (id == null || id.isEmpty) continue;
-      final displayNameNode = channel.findElements('display-name').firstOrNull;
-      if (displayNameNode != null) {
-        final name = displayNameNode.text.trim();
-        if (name.isNotEmpty) {
-          idToName[id] = name;
+      final idToName = <String, String>{};
+      for (var channel in document.findAllElements('channel')) {
+        final id = channel.getAttribute('id');
+        if (id == null || id.isEmpty) continue;
+        final displayNameNode = channel.findElements('display-name').firstOrNull;
+        if (displayNameNode != null) {
+          final name = displayNameNode.text.trim();
+          if (name.isNotEmpty) {
+            idToName[id] = name;
+          }
         }
       }
+
+      for (var programme in document.findAllElements('programme')) {
+        final channelId = programme.getAttribute('channel');
+        if (channelId == null) continue;
+        final channelName = idToName[channelId];
+        if (channelName == null) continue;
+
+        final startStr = programme.getAttribute('start');
+        final stopStr = programme.getAttribute('stop');
+        if (startStr == null || stopStr == null) continue;
+
+        final start = _parseDateTime(startStr);
+        final stop = _parseDateTime(stopStr);
+        if (start == null || stop == null) continue;
+
+        final title = programme.findElements('title').firstOrNull?.text ?? '';
+        final desc = programme.findElements('desc').firstOrNull?.text ?? '';
+
+        final epg = EpgProgram(
+          title: title,
+          start: start,
+          end: stop,
+          desc: desc.isNotEmpty ? desc : null,
+        );
+
+        programs.putIfAbsent(channelName, () => []);
+        programs[channelName]!.add(epg);
+      }
+
+      for (var key in programs.keys) {
+        programs[key]!.sort((a, b) => a.start.compareTo(b.start));
+      }
+      return programs;
+    } catch (e) {
+      return {};
     }
-
-    for (var programme in document.findAllElements('programme')) {
-      final channelId = programme.getAttribute('channel');
-      if (channelId == null) continue;
-      final channelName = idToName[channelId];
-      if (channelName == null) continue;
-
-      final startStr = programme.getAttribute('start');
-      final stopStr = programme.getAttribute('stop');
-      if (startStr == null || stopStr == null) continue;
-
-      final start = _parseDateTime(startStr);
-      final stop = _parseDateTime(stopStr);
-      if (start == null || stop == null) continue;
-
-      final title = programme.findElements('title').firstOrNull?.text ?? '';
-      final desc = programme.findElements('desc').firstOrNull?.text ?? '';
-
-      final epg = EpgProgram(
-        title: title,
-        start: start,
-        end: stop,
-        desc: desc.isNotEmpty ? desc : null,
-      );
-
-      programs.putIfAbsent(channelName, () => []);
-      programs[channelName]!.add(epg);
-    }
-
-    for (var key in programs.keys) {
-      programs[key]!.sort((a, b) => a.start.compareTo(b.start));
-    }
-    return programs;
   }
 
   static DateTime? _parseDateTime(String str) {
@@ -361,6 +392,7 @@ class EpgParser {
     }
   }
 
+  // ---- 缓存加载（解析仍使用 compute，但注意 _parseEpgXml 现在接收文件路径） ----
   static Future<void> _loadCachedEpg() async {
     if (_programsCache != null && _iconMapCache != null) return;
     await _initCache();
@@ -395,17 +427,12 @@ class EpgParser {
     }
 
     try {
-      final xmlContent = await xmlFile.readAsString();
-      if (xmlContent.trim().isEmpty || !xmlContent.trim().startsWith('<')) {
-        await xmlFile.delete();
-        _programsCache = {};
-        await LogService.write('EPG XML 内容无效，已删除并重置缓存');
-        return;
-      }
-      _programsCache = await compute(_parseEpgXmlIsolate, xmlContent);
+      // 解析使用 compute，传入 XML 文件路径
+      _programsCache = await compute(_parseEpgXmlIsolate, xmlFile.path);
 
+      // 如果图标缓存为空，尝试从 XML 提取（通常下载时已提取，这里是兜底）
       if (_iconMapCache == null || _iconMapCache!.isEmpty) {
-        final icons = await compute(_extractIconsIsolate, xmlContent);
+        final icons = await compute(_extractIconsIsolate, xmlFile.path);
         if (icons.isNotEmpty) {
           _iconMapCache = icons;
           await _saveIconCache(icons);
@@ -429,19 +456,17 @@ class EpgParser {
     }
   }
 
-  /// 对外接口：获取名称到 epgid 的映射
+  // ---- 对外接口（完全不变） ----
   static Future<Map<String, String>> getNameToEpgId() async {
     await _loadEpgData();
     return Map.from(_nameToEpgId ?? {});
   }
 
-  /// 获取单个频道的图标地址（供 LogoService 调用）
   static Future<String?> getChannelIconUrl(String channelName) async {
     if (_iconMapCache == null) await _loadCachedEpg();
     return _iconMapCache?[channelName];
   }
 
-  /// 获取单个频道的节目
   static Future<List<EpgProgram>> getProgramsForChannel(
       String channelName) async {
     await _loadEpgData();
@@ -454,7 +479,6 @@ class EpgParser {
     return programs ?? [];
   }
 
-  /// 获取一组频道的节目
   static Future<Map<String, List<EpgProgram>>> getGroupPrograms(
       List<String> channelNames) async {
     await _loadEpgData();
@@ -471,13 +495,11 @@ class EpgParser {
     return result;
   }
 
-  /// 获取所有节目（key = 频道显示名称）
   static Future<Map<String, List<EpgProgram>>> getAllPrograms() async {
     if (_programsCache == null) await _loadCachedEpg();
     return Map.from(_programsCache ?? {});
   }
 
-  /// 获取所有频道图标（key = 频道显示名称）
   static Future<Map<String, String>> getAllChannelIcons() async {
     if (_iconMapCache == null) await _loadCachedEpg();
     return Map.from(_iconMapCache ?? {});
